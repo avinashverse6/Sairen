@@ -36,6 +36,7 @@ fun SettingsScreen(
     notificationsAllowed: Boolean,
     onRequestNotifications: () -> Unit,
     onRescan: () -> Unit,
+    isScanning: Boolean,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
@@ -109,6 +110,20 @@ fun SettingsScreen(
                 text = stringResource(R.string.settings_rescan),
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.weight(1f),
+            )
+            Text(
+                // Brief feedback lives here, in Settings only - never at startup.
+                text = if (isScanning) {
+                    stringResource(R.string.settings_rescanning)
+                } else {
+                    stringResource(R.string.settings_rescan_idle)
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = if (isScanning) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
             )
         }
 

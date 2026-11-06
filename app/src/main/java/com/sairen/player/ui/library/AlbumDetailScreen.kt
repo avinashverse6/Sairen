@@ -24,8 +24,10 @@ fun AlbumDetailScreen(
     album: Album?,
     tracks: List<Track>,
     currentTrackId: Long?,
+    likedIds: Set<Long>,
     actions: PlayerActions,
     onTrackMore: (Track) -> Unit,
+    onToggleLike: (Track) -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
@@ -69,8 +71,10 @@ fun AlbumDetailScreen(
                 isCurrent = track.id == currentTrackId,
                 showArtwork = false,
                 leadingText = (track.trackNumber.takeIf { it > 0 } ?: (index + 1)).toString(),
+                isLiked = track.id in likedIds,
                 onClick = { actions.playTracks(tracks, index) },
                 onMoreClick = { onTrackMore(track) },
+                onToggleLike = { onToggleLike(track) },
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
         }

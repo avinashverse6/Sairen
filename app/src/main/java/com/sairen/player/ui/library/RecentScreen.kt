@@ -20,8 +20,10 @@ import com.sairen.player.ui.player.PlayerActions
 fun RecentScreen(
     recentTracks: List<Track>,
     currentTrackId: Long?,
+    likedIds: Set<Long>,
     actions: PlayerActions,
     onTrackMore: (Track) -> Unit,
+    onToggleLike: (Track) -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
@@ -45,8 +47,10 @@ fun RecentScreen(
             TrackRow(
                 track = track,
                 isCurrent = track.id == currentTrackId,
+                isLiked = track.id in likedIds,
                 onClick = { actions.playTracks(recentTracks, index) },
                 onMoreClick = { onTrackMore(track) },
+                onToggleLike = { onToggleLike(track) },
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
         }

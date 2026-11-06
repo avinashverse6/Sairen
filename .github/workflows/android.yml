@@ -38,21 +38,23 @@ jobs:
           set -o pipefail
           ./gradlew lintDebug --stacktrace 2>&1 | tee lint.log
 
-      - name: Assemble debug APK
+      - name: Assemble debug + release APKs
         id: assemble
         continue-on-error: true
         run: |
           set -o pipefail
-          ./gradlew assembleDebug --stacktrace 2>&1 | tee assemble.log
+          ./gradlew assembleDebug assembleRelease --stacktrace 2>&1 | tee assemble.log
 
       - name: Report APK contents
         if: steps.assemble.outcome == 'success'
         run: |
-          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -n 1)
-          echo "APK: $APK"
-          unzip -l "$APK" > apk-contents.txt
-          cat apk-contents.txt
-          grep -E 'lib/|\.so$' apk-contents.txt || echo "No native libraries (no lib/ folder) in the APK"
+          : > apk-contents.txt
+          for APK in $(find app/build/outputs/apk -name '*.apk' | sort); do
+            echo "### $APK" | tee -a apk-contents.txt
+            unzip -l "$APK" | tee -a apk-contents.txt
+          done
+          echo "--- native libraries across all APKs ---"
+          grep -E 'lib/|\.so$' apk-contents.txt || echo "No native libraries in any APK"
 
       - name: Publish CI diagnostics
         if: always()
@@ -66,8 +68,8 @@ jobs:
         if: steps.assemble.outcome == 'success'
         uses: actions/upload-artifact@v6
         with:
-          name: sairen-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: sairen-apks
+          path: app/build/outputs/apk/**/*.apk
 
       - name: Fail if any required step failed
         if: always()

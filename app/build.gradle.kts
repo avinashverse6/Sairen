@@ -47,6 +47,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Signed with the debug key so the R8 build can be installed on a device
+            // for performance testing. This is not a production signing setup.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

@@ -54,8 +54,10 @@ import com.sairen.player.ui.player.PlayerActions
 fun SearchScreen(
     viewModel: SearchViewModel,
     currentTrackId: Long?,
+    likedIds: Set<Long>,
     actions: PlayerActions,
     onTrackMore: (Track) -> Unit,
+    onToggleLike: (Track) -> Unit,
     onAlbumClick: (Album) -> Unit,
     onArtistClick: (String) -> Unit,
     onBack: () -> Unit,
@@ -194,8 +196,10 @@ fun SearchScreen(
                         TrackRow(
                             track = track,
                             isCurrent = track.id == currentTrackId,
+                            isLiked = track.id in likedIds,
                             onClick = { actions.playTracks(results.tracks, index) },
                             onMoreClick = { onTrackMore(track) },
+                            onToggleLike = { onToggleLike(track) },
                             modifier = Modifier.padding(horizontal = 12.dp),
                         )
                     }

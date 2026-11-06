@@ -18,22 +18,32 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sairen.player.R
+import com.sairen.player.playback.PlayerProgress
 import com.sairen.player.playback.PlayerUiState
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Compact playback bar shown above the navigation bar. Tapping it expands the
- * Now Playing screen; the progress hairline is the only motion on the bar.
+ * Now Playing screen.
+ *
+ * The progress hairline reads [progress] on its own, so the 2 Hz position tick
+ * recomposes a 2 dp line instead of the whole bar (and everything above it).
  */
 @Composable
 fun MiniPlayer(
     state: PlayerUiState,
+    progress: StateFlow<PlayerProgress>,
+    isLiked: Boolean,
+    onToggleLike: () -> Unit,
     onExpand: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -48,18 +58,11 @@ fun MiniPlayer(
                 .clickable(onClick = onExpand)
                 .animateContentSize(),
         ) {
-            LinearProgressIndicator(
-                progress = { state.progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-            )
+            MiniPlayerProgressLine(progress)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Artwork(
@@ -84,6 +87,11 @@ fun MiniPlayer(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                LikeButton(
+                    isLiked = isLiked,
+                    onToggle = onToggleLike,
+                    modifier = Modifier.size(36.dp),
+                )
                 IconButton(onClick = onTogglePlayPause) {
                     Icon(
                         painter = painterResource(
@@ -105,4 +113,17 @@ fun MiniPlayer(
             }
         }
     }
+}
+
+@Composable
+private fun MiniPlayerProgressLine(progress: StateFlow<PlayerProgress>) {
+    val value by progress.collectAsStateWithLifecycle()
+    LinearProgressIndicator(
+        progress = { value.fraction },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(2.dp),
+        color = MaterialTheme.colorScheme.primary,
+        trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+    )
 }

@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,6 +28,11 @@ import com.sairen.player.R
  * cannot supply embedded art — missing art, revoked permission, an OEM provider
  * that does not implement `albumart` — Coil shows the tinted note placeholder
  * instead of a broken image.
+ *
+ * The request is remembered per URI so scrolling does not allocate a new request
+ * (and re-resolve the memory cache key) on every recomposition; Coil derives the
+ * decode size from the composable's constraints, so a 46 dp row thumb is never
+ * decoded at full album-cover resolution.
  */
 @Composable
 fun Artwork(
@@ -45,11 +51,15 @@ fun Artwork(
         contentAlignment = Alignment.Center,
     ) {
         if (hasArt) {
-            AsyncImage(
-                model = ImageRequest.Builder(context)
+            val request = remember(context, artworkUri, crossfade) {
+                ImageRequest.Builder(context)
                     .data(artworkUri)
                     .crossfade(crossfade)
-                    .build(),
+                    .allowHardware(true)
+                    .build()
+            }
+            AsyncImage(
+                model = request,
                 contentDescription = contentDescription,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),

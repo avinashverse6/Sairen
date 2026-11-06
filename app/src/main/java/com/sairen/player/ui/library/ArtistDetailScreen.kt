@@ -28,9 +28,11 @@ fun ArtistDetailScreen(
     tracks: List<Track>,
     albums: List<Album>,
     currentTrackId: Long?,
+    likedIds: Set<Long>,
     actions: PlayerActions,
     onAlbumClick: (Album) -> Unit,
     onTrackMore: (Track) -> Unit,
+    onToggleLike: (Track) -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
@@ -90,8 +92,10 @@ fun ArtistDetailScreen(
             TrackRow(
                 track = track,
                 isCurrent = track.id == currentTrackId,
+                isLiked = track.id in likedIds,
                 onClick = { actions.playTracks(tracks, index) },
                 onMoreClick = { onTrackMore(track) },
+                onToggleLike = { onToggleLike(track) },
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
         }

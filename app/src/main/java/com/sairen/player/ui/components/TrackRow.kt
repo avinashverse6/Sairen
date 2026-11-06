@@ -29,6 +29,9 @@ import com.sairen.player.ui.util.formatDuration
 /**
  * One song row. The title turns accent-green while the track is current, which
  * is a cheap, animated-free way to show state without stealing screen space.
+ *
+ * The heart is optional: pass [onToggleLike] to show it. Its tint is the only
+ * thing that changes when a track is liked, so toggling never re-measures the row.
  */
 @Composable
 fun TrackRow(
@@ -39,13 +42,15 @@ fun TrackRow(
     isCurrent: Boolean = false,
     showArtwork: Boolean = true,
     leadingText: String? = null,
+    isLiked: Boolean = false,
+    onToggleLike: (() -> Unit)? = null,
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leadingText != null) {
@@ -95,12 +100,19 @@ fun TrackRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(6.dp))
         Text(
             text = formatDuration(track.durationMs),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (onToggleLike != null) {
+            LikeButton(
+                isLiked = isLiked,
+                onToggle = onToggleLike,
+                modifier = Modifier.size(36.dp),
+            )
+        }
         IconButton(onClick = onMoreClick, modifier = Modifier.size(40.dp)) {
             Icon(
                 painter = painterResource(R.drawable.ic_more_vert),
@@ -109,5 +121,28 @@ fun TrackRow(
                 modifier = Modifier.size(20.dp),
             )
         }
+    }
+}
+
+/** Heart toggle shared by rows, the sheet, Now Playing and the mini player. */
+@Composable
+fun LikeButton(
+    isLiked: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+    filledTint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary,
+    idleTint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    IconButton(onClick = onToggle, modifier = modifier) {
+        Icon(
+            painter = painterResource(
+                if (isLiked) R.drawable.ic_heart_filled else R.drawable.ic_heart,
+            ),
+            contentDescription = stringResource(
+                if (isLiked) R.string.action_unlike else R.string.action_like,
+            ),
+            tint = if (isLiked) filledTint else idleTint,
+            modifier = Modifier.size(20.dp),
+        )
     }
 }
