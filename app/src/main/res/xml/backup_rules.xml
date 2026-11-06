@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the theme preference and the recently-played list are backed up. -->
+<full-backup-content>
+    <include domain="file" path="datastore/" />
+</full-backup-content>

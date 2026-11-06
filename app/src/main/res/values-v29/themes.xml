@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- API 29+: follow the system day/night setting for the pre-Compose window. -->
+    <style name="Theme.Sairen" parent="android:Theme.DeviceDefault.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/sairen_window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>
