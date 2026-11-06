@@ -32,7 +32,7 @@ LOG_FILES = ("unit-tests.log", "lint.log", "assemble.log")
 STEPS = (
     ("Unit tests", "TEST_OUTCOME", "unit-tests.log"),
     ("Lint", "LINT_OUTCOME", "lint.log"),
-    ("Assemble debug APK", "ASSEMBLE_OUTCOME", "assemble.log"),
+    ("Assemble debug + release APKs", "ASSEMBLE_OUTCOME", "assemble.log"),
 )
 
 
@@ -203,9 +203,9 @@ def main() -> int:
 
     apk = apk_report()
     if apk:
-        emit("notice", "Debug APK report", apk)
+        emit("notice", "APK report", apk)
     if not failures and not lint and not failed_steps():
-        emit("notice", "CI diagnostics", "Unit tests, lint and the debug APK build all succeeded.")
+        emit("notice", "CI diagnostics", "Unit tests, lint and both APK variants (debug + release) succeeded.")
 
     print("\n--- diagnostics summary ---")
     print(f"executed tests: {test_summary()[0]}, failing tests: {len(failures)}, lint errors: {len(lint)}, "
