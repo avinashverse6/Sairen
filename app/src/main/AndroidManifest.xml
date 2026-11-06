@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      Audio read permissions.
+      * API <= 32: READ_EXTERNAL_STORAGE (maxSdkVersion 32 is mandatory, otherwise
+        Play/lenient installs treat the app as a legacy broad-storage app).
+      * API >= 33: READ_MEDIA_AUDIO (audio-scoped, no video/images access).
+      MANAGE_EXTERNAL_STORAGE is deliberately NOT requested; MediaStore audio
+      access never needs it and it is a Play policy restricted permission.
+    -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+
+    <!-- MediaSessionService runs playback in the foreground on API 26+. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
+    <!-- The media3 session notification is a MediaStyle notification on API 33+. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      No INTERNET permission: Sairen is fully offline (Coil only decodes local
+      content:// artwork), so no dependency can exfiltrate or phone home.
+      No WAKE_LOCK is requested here; Media3's own manifest merge may add it for
+      playback wake handling, which is the documented minimum for background audio.
+    -->
+
+    <application
+        android:name=".SairenApplication"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Sairen"
+        android:enableOnBackInvokedCallback="true"
+        tools:targetApi="33">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.Sairen">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          MediaSessionService: owns ExoPlayer + MediaSession, provides the
+          foreground notification and lock-screen controls.
+          exported=true is required so system components (media button
+          dispatcher, Bluetooth, Android Auto, assistant) can bind.
+        -->
+        <service
+            android:name=".playback.PlaybackService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+
+        <!-- Forwards hardware/Bluetooth media buttons to the session. -->
+        <receiver
+            android:name="androidx.media3.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>

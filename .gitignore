@@ -1,0 +1,39 @@
+# Gradle
+.gradle/
+build/
+local.properties
+gradle-app.setting
+.gradletasknamecache
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.hprof
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Kotlin
+.kotlin/
+
+# Signing / secrets — never commit these
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# Build output
+*.apk
+*.aab
+*.ap_
+*.dex
+app/release/
+app/debug/
+out/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
