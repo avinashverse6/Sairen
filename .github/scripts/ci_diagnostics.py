@@ -123,6 +123,33 @@ def lint_errors() -> list[str]:
     return list(dict.fromkeys(errors))
 
 
+def test_summary() -> tuple[int, int, int, list[str]]:
+    """Aggregate the JUnit XML so a run proves how many tests actually executed."""
+    total = failed = skipped = 0
+    suites: list[str] = []
+    for path in sorted(glob.glob("app/build/test-results/**/TEST-*.xml", recursive=True)):
+        try:
+            root = ET.parse(path).getroot()
+        except ET.ParseError:
+            continue
+
+        def count(attribute: str) -> int:
+            try:
+                return int(root.get(attribute) or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        name = (root.get("name") or os.path.basename(path)).split(".")[-1]
+        suite_tests, suite_failures, suite_errors, suite_skipped = (
+            count("tests"), count("failures"), count("errors"), count("skipped"))
+        total += suite_tests
+        failed += suite_failures + suite_errors
+        skipped += suite_skipped
+        suites.append(f"{name}: {suite_tests} tests, "
+                      f"{suite_failures + suite_errors} failed, {suite_skipped} skipped")
+    return total, failed, skipped, suites
+
+
 def apk_report() -> str:
     apks = sorted(glob.glob("app/build/outputs/apk/debug/*.apk"))
     if not apks:
@@ -166,6 +193,14 @@ def main() -> int:
             tail = "\n".join(log.splitlines()[-TAIL_LINES:]) if log else "(no log captured)"
             emit("error", f"{step_name}: log tail", f"outcome={outcome}\n{tail}")
 
+    total, failed_count, skipped_count, suites = test_summary()
+    if total:
+        emit("notice", "Unit test results",
+             f"Executed {total} tests in {len(suites)} classes, "
+             f"{failed_count} failed, {skipped_count} skipped.\n" + "\n".join(suites))
+    else:
+        emit("error", "Unit test results", "No JUnit XML found: no unit test executed in this run.")
+
     apk = apk_report()
     if apk:
         emit("notice", "Debug APK report", apk)
@@ -173,7 +208,7 @@ def main() -> int:
         emit("notice", "CI diagnostics", "Unit tests, lint and the debug APK build all succeeded.")
 
     print("\n--- diagnostics summary ---")
-    print(f"failing tests: {len(failures)}, lint errors: {len(lint)}, "
+    print(f"executed tests: {test_summary()[0]}, failing tests: {len(failures)}, lint errors: {len(lint)}, "
           f"failed steps: {[s for s, _, _ in failed_steps()]}")
     for line in failures[:40]:
         print("FAILED", line)

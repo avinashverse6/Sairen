@@ -10,16 +10,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
 
       # The three build steps below deliberately continue on error: lint and the
       # APK build still run when unit tests fail, and the diagnostics step turns
@@ -64,7 +64,7 @@ jobs:
 
       - name: Upload APK
         if: steps.assemble.outcome == 'success'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: sairen-debug-apk
           path: app/build/outputs/apk/debug/*.apk
