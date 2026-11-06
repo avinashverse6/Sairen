@@ -108,7 +108,8 @@ class MusicRepository(
         runCatching { recentPlayedStore.record(trackId) }
     }
 
-    override suspend fun recordCompletedPlay(trackId: Long) {
+    /** Called by the playback host once per listen, when the play counted. */
+    override suspend fun incrementPlayCount(trackId: Long) {
         if (trackId <= 0L) return
         runCatching { playCountStore.incrementPlayCount(trackId) }
     }

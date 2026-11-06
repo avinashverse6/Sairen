@@ -112,7 +112,7 @@ class PlaybackService : MediaSessionService() {
                 if (countedMediaId == trackId) continue
                 if (PlayCountRules.qualifies(exoPlayer.currentPosition, exoPlayer.duration)) {
                     countedMediaId = trackId
-                    serviceScope.launch { musicLibrary.recordCompletedPlay(trackId) }
+                    serviceScope.launch { musicLibrary.incrementPlayCount(trackId) }
                 }
             }
         }

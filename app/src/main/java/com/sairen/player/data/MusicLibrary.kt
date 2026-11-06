@@ -17,6 +17,12 @@ interface MusicLibrary : LikedTracksStore, PlayCountsStore, PlaylistsStore {
 
     val state: StateFlow<LibraryState>
 
+    // Narrowed to StateFlow: every implementation caches the DataStore flow, and
+    // the UI can then collect it without synthesising an initial value.
+    override val likedIds: StateFlow<Set<Long>>
+    override val playCounts: StateFlow<Map<Long, Int>>
+    override val playlists: StateFlow<List<Playlist>>
+
     /** MediaStore ids of the most recently played tracks, newest first. */
     val recentlyPlayedIds: StateFlow<List<Long>>
 
@@ -24,12 +30,6 @@ interface MusicLibrary : LikedTracksStore, PlayCountsStore, PlaylistsStore {
     suspend fun refresh()
 
     suspend fun recordPlayed(trackId: Long)
-
-    /**
-     * Adds one play to the persistent counter. Called by the playback host once
-     * per listen, after [PlayCountRules] says the listen counted.
-     */
-    suspend fun recordCompletedPlay(trackId: Long)
 
     /** Resolves ids to tracks, preserving the given order and skipping unknown ids. */
     suspend fun tracksByIds(ids: List<Long>): List<Track>

@@ -66,9 +66,9 @@ class LibraryActionsViewModelTest {
             val viewModel = viewModel(library)
             advanceUntilIdle()
 
-            library.recordCompletedPlay(1L)
-            library.recordCompletedPlay(1L)
-            library.recordCompletedPlay(3L)
+            library.incrementPlayCount(1L)
+            library.incrementPlayCount(1L)
+            library.incrementPlayCount(3L)
             advanceUntilIdle()
 
             assertEquals(mapOf(1L to 2, 3L to 1), viewModel.playCounts.value)

@@ -70,7 +70,7 @@ class FakeMusicLibrary(
         recentFlow.value = RecentPlayedList.updated(recentFlow.value, trackId)
     }
 
-    override suspend fun recordCompletedPlay(trackId: Long) {
+    override suspend fun incrementPlayCount(trackId: Long) {
         countsFlow.value = PlayCounts.increment(countsFlow.value, trackId)
     }
 
