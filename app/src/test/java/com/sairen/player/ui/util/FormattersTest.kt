@@ -1,6 +1,5 @@
 package com.sairen.player.ui.util
 
-import com.sairen.player.ui.theme.shouldUseDarkTheme
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -31,40 +30,5 @@ class FormattersTest {
         assertEquals("0 min", formatTotalDuration(0))
         assertEquals("48 min", formatTotalDuration(48 * 60_000L))
         assertEquals("1 h 12 min", formatTotalDuration(72 * 60_000L))
-    }
-}
-
-class WindowSizeTest {
-
-    @Test
-    fun `breakpoints follow the material 3 classes`() {
-        assertEquals(SairenWindowSize.COMPACT, SairenWindowSize.fromWidthDp(320f))
-        assertEquals(SairenWindowSize.COMPACT, SairenWindowSize.fromWidthDp(599f))
-        assertEquals(SairenWindowSize.MEDIUM, SairenWindowSize.fromWidthDp(600f))
-        assertEquals(SairenWindowSize.MEDIUM, SairenWindowSize.fromWidthDp(839f))
-        assertEquals(SairenWindowSize.EXPANDED, SairenWindowSize.fromWidthDp(840f))
-        assertEquals(SairenWindowSize.EXPANDED, SairenWindowSize.fromWidthDp(1280f))
-    }
-
-    @Test
-    fun `flags match the bucket`() {
-        assertEquals(true, SairenWindowSize.COMPACT.isCompact)
-        assertEquals(false, SairenWindowSize.MEDIUM.isCompact)
-        assertEquals(true, SairenWindowSize.EXPANDED.isExpanded)
-    }
-}
-
-class ThemeResolutionTest {
-
-    @Test
-    fun `system mode follows the system setting`() {
-        assertEquals(true, shouldUseDarkTheme(com.sairen.player.data.ThemeMode.SYSTEM, true))
-        assertEquals(false, shouldUseDarkTheme(com.sairen.player.data.ThemeMode.SYSTEM, false))
-    }
-
-    @Test
-    fun `explicit modes override the system setting`() {
-        assertEquals(true, shouldUseDarkTheme(com.sairen.player.data.ThemeMode.DARK, false))
-        assertEquals(false, shouldUseDarkTheme(com.sairen.player.data.ThemeMode.LIGHT, true))
     }
 }

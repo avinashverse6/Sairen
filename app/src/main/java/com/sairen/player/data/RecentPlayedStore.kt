@@ -17,48 +17,22 @@ import kotlinx.coroutines.flow.map
 class RecentPlayedStore(private val dataStore: DataStore<Preferences>) {
 
     val trackIds: Flow<List<Long>> = dataStore.data.map { preferences ->
-        decode(preferences[KEY_RECENT_TRACK_IDS])
+        RecentPlayedList.decode(preferences[KEY_RECENT_TRACK_IDS])
     }
 
     suspend fun record(trackId: Long) {
         if (trackId <= 0L) return
         dataStore.edit { preferences ->
             val updated = RecentPlayedList.updated(
-                current = decode(preferences[KEY_RECENT_TRACK_IDS]),
+                current = RecentPlayedList.decode(preferences[KEY_RECENT_TRACK_IDS]),
                 trackId = trackId,
-                limit = MAX_ENTRIES,
+                limit = RecentPlayedList.DEFAULT_LIMIT,
             )
-            preferences[KEY_RECENT_TRACK_IDS] = updated.joinToString(SEPARATOR)
+            preferences[KEY_RECENT_TRACK_IDS] = RecentPlayedList.encode(updated)
         }
     }
 
-    companion object {
-        const val MAX_ENTRIES = 50
-        private const val SEPARATOR = ","
-        private val KEY_RECENT_TRACK_IDS = stringPreferencesKey("recent_track_ids")
-
-        fun decode(raw: String?): List<Long> =
-            raw.orEmpty()
-                .split(SEPARATOR)
-                .mapNotNull { it.trim().toLongOrNull() }
-                .filter { it > 0L }
-    }
-}
-
-/** Pure list maths for the history, so it can be tested without DataStore. */
-object RecentPlayedList {
-
-    /** Moves [trackId] to the front, de-duplicates and trims to [limit]. */
-    fun updated(current: List<Long>, trackId: Long, limit: Int = RecentPlayedStore.MAX_ENTRIES): List<Long> {
-        if (trackId <= 0L) return current
-        if (limit <= 1) return listOf(trackId)
-        val result = ArrayList<Long>(minOf(current.size + 1, limit))
-        result += trackId
-        for (id in current) {
-            if (id == trackId || id <= 0L) continue
-            if (result.size >= limit) break
-            result += id
-        }
-        return result
+    private companion object {
+        val KEY_RECENT_TRACK_IDS = stringPreferencesKey("recent_track_ids")
     }
 }

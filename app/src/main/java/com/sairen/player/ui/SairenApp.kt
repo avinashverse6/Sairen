@@ -72,6 +72,7 @@ import com.sairen.player.ui.library.LibraryViewModel
 import com.sairen.player.ui.library.RecentScreen
 import com.sairen.player.ui.library.SongsScreen
 import com.sairen.player.ui.navigation.SairenDestinations
+import com.sairen.player.ui.permissions.PermissionDecision
 import com.sairen.player.ui.permissions.Permissions
 import com.sairen.player.ui.player.NowPlayingScreen
 import com.sairen.player.ui.player.PlayerActions
@@ -261,8 +262,20 @@ fun SairenApp(
         )
     }
 
-    if (Permissions.requiresNotificationPermission() && !notificationsAllowed) {
-        NotificationRationaleDialog(onResult = { notificationsAllowed = Permissions.hasNotificationAccess(context) })
+    var notificationPromptDismissed by rememberSaveable { mutableStateOf(false) }
+    if (PermissionDecision.shouldPromptForNotifications(
+            requiresRuntimePermission = Permissions.requiresNotificationPermission(),
+            hasPermission = notificationsAllowed,
+            alreadyPromptedThisSession = notificationPromptDismissed,
+        )
+    ) {
+        NotificationRationaleDialog(
+            onResult = {
+                notificationPromptDismissed = true
+                notificationsAllowed = Permissions.hasNotificationAccess(context)
+            },
+            onDismiss = { notificationPromptDismissed = true },
+        )
     }
 }
 
@@ -271,17 +284,12 @@ fun SairenApp(
  * system prompt is not shown cold with no context.
  */
 @Composable
-private fun NotificationRationaleDialog(onResult: () -> Unit) {
-    var dismissed by rememberSaveable { mutableStateOf(false) }
-    if (dismissed) return
+private fun NotificationRationaleDialog(onResult: () -> Unit, onDismiss: () -> Unit) {
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
-    ) {
-        dismissed = true
-        onResult()
-    }
+    ) { onResult() }
     AlertDialog(
-        onDismissRequest = { dismissed = true },
+        onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.notification_permission_title)) },
         text = { Text(stringResource(R.string.notification_permission_body)) },
         confirmButton = {
@@ -290,7 +298,7 @@ private fun NotificationRationaleDialog(onResult: () -> Unit) {
             }
         },
         dismissButton = {
-            TextButton(onClick = { dismissed = true }) {
+            TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.notification_permission_not_now))
             }
         },

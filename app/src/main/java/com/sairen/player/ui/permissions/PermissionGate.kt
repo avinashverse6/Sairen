@@ -36,8 +36,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.sairen.player.R
 import com.sairen.player.ui.util.findActivity
 
-private enum class AudioAccessState { GRANTED, RATIONALE, PERMANENTLY_DENIED }
-
 /**
  * Gate in front of the library: explains *why* audio access is needed before the
  * system dialog appears, handles a second denial, and offers a route to app
@@ -53,28 +51,27 @@ fun AudioPermissionGate(
     val permission = remember { Permissions.audioPermission() }
 
     var state by remember {
-        mutableStateOf(
-            if (Permissions.hasAudioAccess(context)) AudioAccessState.GRANTED
-            else AudioAccessState.RATIONALE,
-        )
+        mutableStateOf(PermissionDecision.initial(Permissions.hasAudioAccess(context)))
     }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        state = when {
-            granted || Permissions.hasAudioAccess(context) -> AudioAccessState.GRANTED
-            Permissions.shouldShowRationale(activity, permission) -> AudioAccessState.RATIONALE
-            else -> AudioAccessState.PERMANENTLY_DENIED
-        }
+    ) { _ ->
+        state = PermissionDecision.afterRequestResult(
+            hasPermission = Permissions.hasAudioAccess(context),
+            shouldShowRationale = Permissions.shouldShowRationale(activity, permission),
+        )
     }
 
     // Coming back from system settings must re-evaluate the grant.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, context) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME && Permissions.hasAudioAccess(context)) {
-                state = AudioAccessState.GRANTED
+            if (event == Lifecycle.Event.ON_RESUME) {
+                state = PermissionDecision.afterResume(
+                    hasPermission = Permissions.hasAudioAccess(context),
+                    current = state,
+                )
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)

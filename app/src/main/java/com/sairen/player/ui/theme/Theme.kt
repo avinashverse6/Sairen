@@ -55,13 +55,6 @@ private val LightColors = lightColorScheme(
     onError = PaperSurface,
 )
 
-/** Pure resolution of the user's preference, so it can be unit tested. */
-fun shouldUseDarkTheme(mode: ThemeMode, systemInDarkTheme: Boolean): Boolean = when (mode) {
-    ThemeMode.DARK -> true
-    ThemeMode.LIGHT -> false
-    ThemeMode.SYSTEM -> systemInDarkTheme
-}
-
 @Composable
 fun SairenTheme(
     themeMode: ThemeMode,

@@ -1,5 +1,6 @@
 package com.sairen.player.testing
 
+import com.sairen.player.data.LibraryGrouping
 import com.sairen.player.data.MusicLibrary
 import com.sairen.player.data.RecentPlayedList
 import com.sairen.player.data.model.LibrarySnapshot
@@ -8,27 +9,6 @@ import com.sairen.player.data.model.Track
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-
-/** JVM-safe track factory: URIs are plain strings, so no Android framework is needed. */
-fun track(
-    id: Long,
-    title: String,
-    artist: String = "Artist $id",
-    album: String = "Album $id",
-    albumId: Long = id,
-    durationMs: Long = 180_000L,
-    trackNumber: Int = 0,
-): Track = Track(
-    id = id,
-    title = title,
-    artist = artist,
-    album = album,
-    albumId = albumId,
-    durationMs = durationMs,
-    uri = "content://media/external/audio/media/$id",
-    artworkUri = null,
-    trackNumber = trackNumber,
-)
 
 class FakeMusicLibrary(
     initialTracks: List<Track> = emptyList(),
@@ -60,7 +40,7 @@ class FakeMusicLibrary(
             stateFlow.value = LibraryState(
                 isLoading = false,
                 hasLoadedOnce = true,
-                library = com.sairen.player.data.LibraryGrouping.snapshot(scanned),
+                library = LibraryGrouping.snapshot(scanned),
             )
         }
     }
@@ -78,7 +58,7 @@ class FakeMusicLibrary(
         stateFlow.value = LibraryState(
             isLoading = false,
             hasLoadedOnce = true,
-            library = com.sairen.player.data.LibraryGrouping.snapshot(tracks),
+            library = LibraryGrouping.snapshot(tracks),
         )
     }
 
