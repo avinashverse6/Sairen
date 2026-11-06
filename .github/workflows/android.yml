@@ -56,6 +56,10 @@ jobs:
 
       - name: Publish CI diagnostics
         if: always()
+        env:
+          TEST_OUTCOME: ${{ steps.unit_tests.outcome }}
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
+          ASSEMBLE_OUTCOME: ${{ steps.assemble.outcome }}
         run: python3 .github/scripts/ci_diagnostics.py
 
       - name: Upload APK

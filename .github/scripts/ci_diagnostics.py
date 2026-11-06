@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Aggregate CI failures into GitHub check-run annotations.
 
-Actions job logs are served from a signed object-store URL that cannot be fetched
+Actions job logs are served from a signed object-store URL that is not reachable
 from every environment. Check-run annotations, however, are plain REST data, so
 this script turns the interesting parts of the Gradle output into `::error::`
-commands: compile errors, failing unit tests (from the JUnit XML), lint errors
-and the APK native-library report.
+commands: Kotlin compile errors, failing unit tests (from the JUnit XML), lint
+errors, aapt2/resource-link errors and the APK native-library report.
+
+The workflow passes each build step's `outcome` in the environment so the script
+only reports on steps that actually failed.
 
 Usage (inside the workflow):
     python3 .github/scripts/ci_diagnostics.py
@@ -19,8 +22,15 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
-MAX_ANNOTATION_CHARS = 12_000
+MAX_ANNOTATION_CHARS = 14_000
+TAIL_LINES = 40
 LOG_FILES = ("unit-tests.log", "lint.log", "assemble.log")
+
+STEPS = (
+    ("Unit tests", "TEST_OUTCOME", "unit-tests.log"),
+    ("Lint", "LINT_OUTCOME", "lint.log"),
+    ("Assemble debug APK", "ASSEMBLE_OUTCOME", "assemble.log"),
+)
 
 
 def escape(text: str) -> str:
@@ -37,132 +47,139 @@ def emit(level: str, title: str, message: str) -> None:
     print(f"::{level} title={title}::{escape(message)}")
 
 
-def read_log(name: str) -> str:
+def read_text(name: str) -> str:
     if not os.path.exists(name):
         return ""
     with open(name, encoding="utf-8", errors="replace") as handle:
         return handle.read()
 
 
-def section(name: str) -> str:
-    """Return the text of all logs so cross-cutting greps stay simple."""
-    return "\n".join(read_log(name) for name in (name,) if name)
+def failure_block(log: str) -> str:
+    """Return the `* What went wrong:` section of a Gradle failure."""
+    lines = log.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("FAILURE: Build failed with an exception."):
+            return "\n".join(lines[index:index + 45])
+    return ""
 
 
-def kotlin_compile_errors(logs: str) -> list[str]:
-    errors = []
-    for line in logs.splitlines():
+def error_lines(log: str) -> list[str]:
+    """Lines that carry the actual tool error (Kotlin, aapt2, lint, Gradle)."""
+    collected = []
+    for line in log.splitlines():
         stripped = line.strip()
-        if re.match(r"^e: (file|.*\.kt)", stripped) or stripped.startswith("e: "):
-            errors.append(stripped)
-    # Keep order, drop duplicates.
-    return list(dict.fromkeys(errors))
-
-
-def gradle_failures(logs: str) -> list[str]:
-    matches = []
-    for match in re.finditer(
-        r"(FAILURE: Build failed with an exception\.(?:\n.+?){0,25})", logs
-    ):
-        matches.append(match.group(1))
-    for match in re.finditer(r"^> Task .* FAILED$", logs, re.MULTILINE):
-        matches.append(match.group(0))
-    return list(dict.fromkeys(matches))
+        if not stripped:
+            continue
+        if stripped.startswith("e: "):
+            collected.append(stripped)
+        elif re.search(r"(?i)\bAAPT\d*\b|Android resource linking failed", stripped):
+            collected.append(stripped)
+        elif re.search(r"(?i)^(error|fatal):|:\s*error:", stripped):
+            collected.append(stripped)
+        elif re.search(r"(?i)Caused by:|Unresolved reference|not found\.$", stripped):
+            collected.append(stripped)
+    return list(dict.fromkeys(collected))
 
 
 def junit_failures() -> list[str]:
-    failures = []
-    patterns = [
-        "app/build/test-results/**/TEST-*.xml",
-        "app/build/test-results/**/*.xml",
-    ]
-    seen: set[str] = set()
-    for pattern in patterns:
-        for path in sorted(glob.glob(pattern, recursive=True)):
-            if path in seen:
+    failures: list[str] = []
+    for path in sorted(glob.glob("app/build/test-results/**/TEST-*.xml", recursive=True)):
+        try:
+            root = ET.parse(path).getroot()
+        except ET.ParseError:
+            continue
+        for case in root.iter("testcase"):
+            problem = case.find("failure")
+            if problem is None:
+                problem = case.find("error")
+            if problem is None:
                 continue
-            seen.add(path)
-            try:
-                root = ET.parse(path).getroot()
-            except ET.ParseError:
-                continue
-            for case in root.iter("testcase"):
-                problem = case.find("failure")
-                if problem is None:
-                    problem = case.find("error")
-                if problem is None:
-                    continue
-                name = f"{case.get('classname', '?')}.{case.get('name', '?')}"
-                message = (problem.get("message") or problem.text or "").strip()
-                message = re.sub(r"\s+", " ", message)
-                failures.append(f"{name} :: {message[:600]}")
+            name = f"{case.get('classname', '?')}.{case.get('name', '?')}"
+            message = (problem.get("message") or problem.text or "").strip()
+            message = re.sub(r"\s+", " ", message)
+            failures.append(f"{name} :: {message[:600]}")
     return failures
 
 
 def lint_errors() -> list[str]:
     errors: list[str] = []
-    for path in glob.glob("app/build/reports/lint-results-*.txt"):
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                if re.search(r":\s*(Error|Fatal):\s", line):
-                    errors.append(line.strip())
-    log = read_log("lint.log")
-    for line in log.splitlines():
+    for path in sorted(glob.glob("app/build/reports/lint-results-*.txt")):
+        for line in read_text(path).splitlines():
+            if re.search(r":\s*(Error|Fatal):\s", line):
+                errors.append(line.strip())
+    for line in read_text("lint.log").splitlines():
         if "Lint found" in line and "error" in line:
             errors.append(line.strip())
     return list(dict.fromkeys(errors))
 
 
 def apk_report() -> str:
-    if not os.path.exists("apk-contents.txt"):
+    apks = sorted(glob.glob("app/build/outputs/apk/debug/*.apk"))
+    if not apks:
         return ""
-    with open("apk-contents.txt", encoding="utf-8", errors="replace") as handle:
-        listing = handle.read()
-    libs = [line.strip() for line in listing.splitlines() if re.search(r"lib/|\.so$", line)]
-    apks = glob.glob("app/build/outputs/apk/debug/*.apk")
     sizes = [f"{os.path.basename(p)} ({os.path.getsize(p) // 1024} KiB)" for p in apks]
+    listing = read_text("apk-contents.txt")
+    libs = [line.strip() for line in listing.splitlines() if re.search(r"lib/|\.so$", line)]
     if libs:
         return "APK: " + ", ".join(sizes) + "\nNative libraries:\n" + "\n".join(libs)
     return (
-        "APK: "
-        + (", ".join(sizes) or "MISSING")
+        "APK: " + ", ".join(sizes)
         + "\nNo lib/ entries and no .so files: the APK contains no native code."
     )
 
 
-def main() -> int:
-    logs = "\n".join(read_log(name) for name in LOG_FILES)
-    failures = junit_failures()
+def failed_steps() -> list[tuple[str, str]]:
+    """Return (step name, log file) for steps whose outcome was not success."""
+    result = []
+    for name, env_var, log_name in STEPS:
+        outcome = os.environ.get(env_var, "success")
+        if outcome not in ("success", ""):
+            result.append((name, log_name))
+    return result
 
+
+def main() -> int:
+    failures = junit_failures()
     if failures:
-        emit("error", "Unit tests failed", "\n".join(failures))
-    compile_errors = kotlin_compile_errors(logs)
-    if compile_errors:
-        emit("error", "Kotlin compilation errors", "\n".join(compile_errors))
+        emit("error", "Unit tests failed", "Failing test cases:\n" + "\n".join(failures))
+
     lint = lint_errors()
     if lint:
         emit("error", "Android lint errors", "\n".join(lint))
-    if not failures and compile_errors:
-        pass
-    elif not failures and not compile_errors:
-        build_errors = gradle_failures(logs)
-        if build_errors:
-            emit("error", "Gradle failure", "\n\n".join(build_errors))
+
+    for step_name, log_name in failed_steps():
+        log = read_text(log_name)
+        parts = [f"Step `{step_name}` failed."]
+        wants = os.environ.get(
+            {"Unit tests": "TEST_OUTCOME", "Lint": "LINT_OUTCOME", "Assemble debug APK": "ASSEMBLE_OUTCOME"}[step_name]
+        )
+        if wants and wants != "success":
+            parts.append(f"(outcome: {wants})")
+        block = failure_block(log)
+        if block:
+            parts.append("Gradle failure:\n" + block)
+        interesting = error_lines(log)
+        if interesting:
+            parts.append("Tool errors:\n" + "\n".join(interesting[:25]))
+        tail = "\n".join(log.splitlines()[-TAIL_LINES:]) if log else "(no log captured)"
+        parts.append(f"Last {TAIL_LINES} lines of `{log_name}`:\n" + tail)
+        emit("error", f"{step_name}: failure details", "\n\n".join(parts))
+
     apk = apk_report()
     if apk:
         emit("notice", "Debug APK report", apk)
-    if not (failures or compile_errors or lint):
-        emit("notice", "CI diagnostics", "No test, compile or lint failures found in this run.")
+    if not failures and not lint and not failed_steps():
+        emit("notice", "CI diagnostics", "Unit tests, lint and the debug APK build all succeeded.")
 
-    # Human-readable tail for the step log itself.
     print("\n--- diagnostics summary ---")
-    print(f"failing tests: {len(failures)}, compile errors: {len(compile_errors)}, lint errors: {len(lint)}")
+    print(f"failing tests: {len(failures)}, lint errors: {len(lint)}, failed steps: {[s for s, _ in failed_steps()]}")
     for line in failures[:40]:
         print("FAILED", line)
-    for line in compile_errors[:40]:
-        print("COMPILE", line)
     for line in lint[:40]:
         print("LINT", line)
+    for step_name, log_name in failed_steps():
+        print(f"== {step_name} ({log_name}) ==")
+        print(failure_block(read_text(log_name))[:3000])
     return 0
 
 
