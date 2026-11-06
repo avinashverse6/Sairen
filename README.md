@@ -7,15 +7,17 @@ Sairen reads the audio files that Android's MediaStore already indexed on your d
 through a `MediaSessionService` so playback survives leaving the app, and keeps the whole experience
 on-device: no accounts, no streaming, no ads, no analytics, no telemetry, no Internet permission.
 
-> **Verification status (please read):** the full source tree and Gradle wrapper are committed. This
-> project was authored in a sandbox where the Android SDK, the Gradle distribution and all Maven
-> repositories are unreachable, so `./gradlew assembleDebug`, `./gradlew lint` and `./gradlew test` could
-> **not** be executed. What *was* executed: the framework-free half of the app (data, queue maths, search,
-> formatting, window classes, permission-flow decisions) was compiled with a real Kotlin 2.4.21 compiler
-> and **58 unit tests pass**; see [Verification](#verification-what-was-actually-run) for the exact
-> commands. The Android/Compose/Media3 layer (activity, service, controller, ViewModels, screens, resource
-> linking) remains **uncompiled and untested** — treat it as unproven until you run the build locally or
-> in CI (workflow included).
+> **Verification status (please read):** the whole app now **builds in CI**. GitHub Actions
+> (`.github/workflows/android.yml`, run `42212827921` on 2026-11-06) ran the real Gradle build:
+> `:app:compileDebugKotlin` and `:app:compileDebugUnitTestKotlin` succeed, **71 unit tests execute in 14
+> classes with 0 failures and 0 skipped**, `lintDebug` passes, and `assembleDebug` produces
+> `app-debug.apk` (15,646 KiB) whose `lib/` contents were inspected and uploaded as an artifact. Two real
+> defects that this first compile exposed were fixed rather than papered over (see
+> [CI build and the two bugs it caught](#4-ci-build-and-the-two-bugs-it-caught)). What is still *not*
+> verified: installing the APK, actual playback, notifications/lock-screen controls, and any on-device
+> rendering — there was no device or emulator. Earlier in authoring, only the framework-free half of the
+> code could be exercised (a real Kotlin 2.4.21 compiler, 58 pure-logic tests); that sandbox evidence is
+> kept in [Verification](#verification-what-was-actually-run).
 
 ---
 
@@ -31,6 +33,7 @@ on-device: no accounts, no streaming, no ads, no analytics, no telemetry, no Int
 - [ABI notes](#abi-notes)
 - [Performance notes](#performance-notes)
 - [Verification: what was actually run](#verification-what-was-actually-run)
+- [CI build and the two bugs it caught](#4-ci-build-and-the-two-bugs-it-caught)
 - [Known limitations](#known-limitations)
 - [Attribution](#attribution)
 
@@ -69,7 +72,8 @@ on-device: no accounts, no streaming, no ads, no analytics, no telemetry, no Int
 - **Kotlin** 2.2.10, **Compose** (BOM 2025.08.01, Material 3), **Navigation Compose** 2.9.0
 - **AndroidX Media3** 1.8.0 (`media3-exoplayer`, `media3-session`)
 - **DataStore Preferences** 1.1.7 (settings + history + last session; no Room, no KSP)
-- **Coil** 2.7.0 for artwork (`coil-compose`; pure Kotlin/Java, ships **no** native `.so` files)
+- **Coil** 2.7.0 for artwork (`coil-compose`; pure Kotlin/Java — the built APK's JNI libraries come
+  from `androidx.graphics.path` and DataStore, not Coil; see [ABI notes](#abi-notes))
 - **MVVM**: `ViewModel` + `StateFlow`, a `MusicLibrary` repository seam, manual DI via `AppContainer`
   (no Hilt: one activity, one service, a handful of ViewModels — Hilt would add a plugin, a compiler and
   startup cost for no gain)
@@ -178,10 +182,12 @@ artifacts — the *app* needs no network at runtime and has no `INTERNET` permis
 | `FormattersTest` | `m:ss` / `h:mm:ss`, negative/unknown durations, totals |
 | `WindowSizeTest` / `ThemeResolutionTest` | 600/840 dp breakpoints, system-vs-explicit theme resolution |
 
-The pure-logic tests above (58 assertions-groups) were **actually executed** in the authoring sandbox —
-see [Verification](#verification-what-was-actually-run). The two ViewModel test classes
-(`SearchViewModelTest`, `LibraryViewModelTest`, `SettingsViewModelTest`) depend on
-`kotlinx-coroutines-test`, which was not downloadable here, so they were written but not run.
+All 14 test classes (**71 tests**) run in CI on every push, and the workflow publishes the numbers
+(class by class) as a check-run annotation. `LibraryViewModelTest` (6), `SearchViewModelTest` (4) and
+`SettingsViewModelTest` (3) are the coroutine-ViewModel tests: they use `kotlinx-coroutines-test` with a
+`MainDispatcherRule` and virtual time, and they compile and pass in CI (`0 failed, 0 skipped`).
+`testing/` also holds three helper files that are not test classes (`MainDispatcherRule`,
+`FakeMusicLibrary`, `TestTracks`).
 
 ## Permissions
 
@@ -217,22 +223,33 @@ Notifications get their own one-time rationale dialog on API 33+, and a persiste
 ## ABI notes
 
 - `defaultConfig.ndk.abiFilters = ["armeabi-v7a", "arm64-v8a"]`, and `splits.abi` is disabled, so
-  `assembleDebug` produces **one universal APK**.
-- **There are no native libraries.** Sairen contains no C/C++ and none of its dependencies ship JNI
-  code: Compose, Media3 (ExoPlayer's default extractors/decoders are Java/Kotlin calling platform
-  `MediaCodec`), DataStore, Coil 2.7 (`coil-compose` is Kotlin/Java on top of OkHttp; the optional
-  `coil-gif`/`coil-svg`/`coil-video` modules, which are also pure JVM, are not used). So the expected
-  `lib/` folder in the APK is **empty/absent**; the ABI filters are a guard so a future native
-  dependency cannot silently drop 32-bit ARM.
+  `assembleDebug` produces **one universal APK** that carries both 32-bit and 64-bit ARM code.
+- **Measured in CI**, not assumed: `app-debug.apk` is 15,646 KiB and its `lib/` contains exactly four
+  native libraries, all of them ARM:
+
+  | Library | ABI | Size |
+  | --- | --- | --- |
+  | `libandroidx.graphics.path.so` | `arm64-v8a` | 10,096 B |
+  | `libdatastore_shared_counter.so` | `arm64-v8a` | 7,112 B |
+  | `libandroidx.graphics.path.so` | `armeabi-v7a` | 7,252 B |
+  | `libdatastore_shared_counter.so` | `armeabi-v7a` | 4,416 B |
+
+  They come from `androidx.graphics:graphics-path` (a transitive Compose dependency) and from DataStore's
+  shared counter. Sairen itself contains no C/C++ and calls no JNI directly. There are **no x86/x86_64**
+  libraries, because the ABI filters drop every other ABI. An earlier revision of this file claimed the
+  APK would have an empty `lib/` folder — that was a reading of the dependency list, and the first real
+  build falsified it; the numbers above are what the build actually produced.
+- Total native payload is ~28 KiB, so the "one universal APK" trade-off costs nothing measurable.
 - Verify in your build with:
 
   ```bash
   unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -E 'lib/|\.so' || echo "no native libs"
   ```
 
-  The CI workflow prints the same line, and states so explicitly when nothing matches.
-- 32-bit ARM support: every dependency above is architecture-independent, so `armeabi-v7a` devices
-  (including 32-bit-only ones) run exactly the same code; no dependency needs a per-ABI variant.
+  The CI workflow prints the same listing and turns it into a check-run annotation, so the contents are
+  auditable from the run page.
+- 32-bit ARM devices run exactly the same Kotlin code; the two JNI libraries above ship both
+  `armeabi-v7a` and `arm64-v8a` builds, so neither ABI is short-changed.
 
 ## Performance notes
 
@@ -306,27 +323,72 @@ Compiled files: `Models.kt`, `ThemeMode.kt`, `LibraryGrouping.kt`, `RecentPlayed
 `Formatters.kt`, `SairenWindowSize.kt`, `ThemeResolution.kt` — plus their test classes. Because the
 compiler is a *real* Kotlin compiler, this also type-checks every declaration those files use.
 
-### 4. What is explicitly **not** verified
+### 4. CI build and the two bugs it caught
+
+The sandbox above could not run Gradle, so the whole Android layer was compiled for the first time on
+GitHub's runners. The first CI runs (`42210231759`, `42210361824`, `42210656856`) all failed in the
+"Unit tests" step. Because the Actions job log is served from a signed object-store URL that is not
+reachable from here, the workflow was extended with `.github/scripts/ci_diagnostics.py`, which converts
+Gradle/Kotlin/aapt2/lint output and the JUnit XML into **check-run annotations**. That is how the real
+errors were read, verbatim:
+
+1. **Broken platform theme reference (resource linking).**
+   `values-v29/themes.xml` used `parent="android:Theme.DeviceDefault.DayNight.NoActionBar"`. The platform
+   has no such style (AOSP defines `Theme.DeviceDefault.DayNight`, and `NoActionBar` variants exist only
+   for other `DeviceDefault` themes), so aapt2 failed with
+
+   ```
+   ERROR: AAPT: error: resource android:style/Theme.DeviceDefault.DayNight.NoActionBar not found.
+   error: failed linking references.
+   ```
+
+   `:app:processDebugResources` failed — and because `testDebugUnitTest`, `lintDebug` and `assembleDebug`
+   all depend on it, that single error is what made the *unit test* step fail before a single test ran.
+   Fixed by parenting on `android:Theme.DeviceDefault.DayNight` and suppressing the action bar with
+   `windowActionBar=false` / `windowNoTitle=true` (the day/night launch window is preserved).
+
+2. **Material 3 API used outside its scope (Kotlin).** With resources linking, compilation proceeded and
+   `:app:compileDebugKotlin` failed with
+
+   ```
+   e: SairenApp.kt:375:5 Unresolved reference 'NavigationBarItem'.
+   e: SairenApp.kt:379:13 @Composable invocations can only happen from the context of a @Composable function
+   ```
+
+   Material 3 declares `NavigationBarItem` as `RowScope.NavigationBarItem`, so it cannot be called from a
+   standalone composable. The local wrapper is now `private fun RowScope.TopLevelNavItem(...)`, which is
+   what its three call sites (all inside `NavigationBar { }`) already were.
+
+After both fixes, run **`42212827921`** is green end to end: unit tests, lint, APK assembly, the APK
+contents report and the artifact upload. Annotations from that run:
+
+```
+Unit tests   : Executed 71 tests in 14 classes, 0 failed, 0 skipped.
+Lint         : passed
+Assemble     : app-debug.apk (15,646 KiB)
+lib/         : 4 files, arm64-v8a + armeabi-v7a only (see ABI notes)
+```
+
+No test was deleted, skipped, weakened or disabled to get there; the two changes are the resource fix
+and the `RowScope` fix.
+
+### 5. What is explicitly **not** verified
 
 | Item | Status |
 | --- | --- |
-| `./gradlew assembleDebug` (and `assembleRelease`) | **NOT RUN** — Gradle distribution, Android SDK and Maven artifacts unreachable |
-| `./gradlew lint`, `./gradlew test` | **NOT RUN** — same reason |
-| Debug APK existence and `unzip -l` `lib/` inspection | **NOT RUN** — no APK was produced |
-| Android/Compose/Media3 layer: `MainActivity`, `SairenApp`, all screens/components, `PlayerConnection`, `PlaybackService`, `MusicRepository`, `MediaStoreDataSource`, the three coroutine ViewModels | **NOT COMPILED** — requires AndroidX/Media3 AARs and the Android SDK |
-| Manifest merger output, `foregroundServiceType` in the merged manifest, R8 shrinking | **NOT VERIFIED** — needs a real build (the source manifest was reviewed by hand; sections below) |
+| `./gradlew testDebugUnitTest`, `lintDebug`, `assembleDebug` | **RUN — green in GitHub Actions** (run `42212827921`); still **not run locally**, because the sandbox has no Gradle distribution, Android SDK or Maven access |
+| `assembleRelease` (R8 minify + resource shrinking) | **NOT RUN** — CI builds debug only |
+| Debug APK existence and `unzip -l` `lib/` inspection | **RUN** — 15,646 KiB APK, 4 ARM-only native libraries, artifact uploaded |
+| Kotlin compilation of the Android/Compose/Media3 layer | **RUN** — `compileDebugKotlin` and `compileDebugUnitTestKotlin` succeed in CI |
+| Manifest merger output, `foregroundServiceType` in the merged manifest | **NOT VERIFIED** — needs a merged-manifest artifact |
 | Install, playback, notification/lock-screen controls, permission dialogs, headphone-unplug pause, process-death resume | **NOT TESTED** — no emulator, no device, no `adb` |
-| Compose UI rendering / responsive layouts on phones, foldables and tablets | **NOT TESTED** — visual result unseen |
-
-Because a large part of the code was never compiled, the first local `./gradlew assembleDebug` may
-surface small compiler errors (a missing import, a renamed Material 3 parameter, a Media3 1.8 signature
-difference). The version pins were chosen conservatively for that reason. Please report the exact
-compiler output if you hit one.
+| Compose UI rendering / responsive layouts on phones, foldables and tablets | **NOT TESTED** — the APK has never been rendered |
 
 ## Known limitations
 
-- **Not compiled or run in the authoring environment** (see above) — treat the build as unproven until
-  you run it.
+- **Built, but never run.** Unit tests, lint and the debug APK build are green in CI; the APK has
+  never been installed, so runtime behaviour (playback, service lifecycle, notifications, UI rendering)
+  is still unproven until someone runs it on a device.
 - Album art uses the legacy `content://media/external/audio/albumart/<albumId>` provider. It is what
   most devices implement, but it is not a public API: on devices that do not implement it, artwork falls
   back to the placeholder (iOS-style per-track `MediaMetadataRetriever` extraction is not implemented).

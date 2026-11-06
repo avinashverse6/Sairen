@@ -1,8 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- API 29+: follow the system day/night setting for the pre-Compose window. -->
-    <style name="Theme.Sairen" parent="android:Theme.DeviceDefault.DayNight.NoActionBar">
+    <!--
+      API 29+: the platform theme follows the system day/night setting.
+      `android:Theme.DeviceDefault.DayNight` exists from API 29; the platform
+      defines no `Theme.DeviceDefault.DayNight.NoActionBar` variant (AAPT fails
+      to link that name), so the action bar is suppressed with theme items.
+    -->
+    <style name="Theme.Sairen" parent="android:Theme.DeviceDefault.DayNight">
         <item name="android:windowBackground">@color/sairen_window_background</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowLightStatusBar">false</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
