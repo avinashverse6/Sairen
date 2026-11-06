@@ -13,13 +13,16 @@ import androidx.media3.session.MediaSessionService
 import com.sairen.player.MainActivity
 import com.sairen.player.SairenApplication
 import com.sairen.player.data.MusicLibrary
+import com.sairen.player.data.PlayCountRules
 import com.sairen.player.data.PlaybackSessionStore
 import com.sairen.player.data.SavedSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -46,6 +49,13 @@ class PlaybackService : MediaSessionService() {
     private lateinit var musicLibrary: MusicLibrary
     private lateinit var playbackSessionStore: PlaybackSessionStore
 
+    /**
+     * MediaStore id whose play has already been counted for the current listen.
+     * Reset on every item transition, so a repeat counts once per pass and seeks
+     * or resumes never double-count.
+     */
+    private var countedMediaId: Long? = null
+
     override fun onCreate() {
         super.onCreate()
         val container = (application as SairenApplication).container
@@ -66,6 +76,7 @@ class PlaybackService : MediaSessionService() {
 
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                countedMediaId = null
                 persistSession()
                 val trackId = mediaItem?.mediaId?.toLongOrNull() ?: return
                 serviceScope.launch { musicLibrary.recordPlayed(trackId) }
@@ -81,6 +92,30 @@ class PlaybackService : MediaSessionService() {
             .build()
 
         restoreLastSession()
+        watchPlaybackProgress()
+    }
+
+    /**
+     * Counts a play once the current track has been heard past its threshold.
+     *
+     * ExoPlayer has no continuous position callback, so this polls once a second
+     * while playing (a single cheap read) and stops tracking the id once counted.
+     */
+    private fun watchPlaybackProgress() {
+        serviceScope.launch {
+            while (isActive) {
+                delay(PLAY_COUNT_POLL_MS)
+                if (!::player.isInitialized) continue
+                val exoPlayer = player
+                if (!exoPlayer.isPlaying) continue
+                val trackId = exoPlayer.currentMediaItem?.mediaId?.toLongOrNull() ?: continue
+                if (countedMediaId == trackId) continue
+                if (PlayCountRules.qualifies(exoPlayer.currentPosition, exoPlayer.duration)) {
+                    countedMediaId = trackId
+                    serviceScope.launch { musicLibrary.recordCompletedPlay(trackId) }
+                }
+            }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
@@ -132,6 +167,10 @@ class PlaybackService : MediaSessionService() {
                 saved.positionMs,
             )
         }
+    }
+
+    private companion object {
+        const val PLAY_COUNT_POLL_MS = 1_000L
     }
 
     private fun openAppIntent(): PendingIntent {

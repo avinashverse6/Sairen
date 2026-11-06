@@ -17,6 +17,8 @@ data class Track(
     val uri: String,
     val artworkUri: String?,
     val trackNumber: Int = 0,
+    /** MediaStore `DATE_ADDED` in epoch milliseconds (0 when unknown). */
+    val dateAddedMs: Long = 0L,
 )
 
 data class Album(

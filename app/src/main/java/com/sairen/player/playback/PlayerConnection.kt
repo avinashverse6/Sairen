@@ -21,13 +21,20 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Single owner of the app's `MediaController` connection.
  *
- * The UI never touches Media3 types: it observes [state] and calls the intent
- * methods below. All controller calls happen on the main thread, as Media3
- * requires.
+ * The UI never touches Media3 types: it observes [state] and [progress] and calls
+ * the intent methods below. All controller calls happen on the main thread, as
+ * Media3 requires.
+ *
+ * Two performance rules shape this class:
+ *  * the 2 Hz position tick publishes only [progress], never [state], so the
+ *    screen around the seek bar does not recompose twice a second;
+ *  * the queue snapshot is rebuilt only when the timeline actually changed, not
+ *    on every player event (which would walk thousands of media items).
  */
 // Media3 marks a handful of controller/session APIs @UnstableApi (they may change
 // between minor versions). Opting in locally keeps lint's UnsafeOptInUsageError
@@ -40,6 +47,9 @@ class PlayerConnection(context: Context) {
 
     private val _state = MutableStateFlow(PlayerUiState())
     val state: StateFlow<PlayerUiState> = _state.asStateFlow()
+
+    private val _progress = MutableStateFlow(PlayerProgress())
+    val progress: StateFlow<PlayerProgress> = _progress.asStateFlow()
 
     private val sessionToken = SessionToken(
         appContext,
@@ -56,7 +66,14 @@ class PlayerConnection(context: Context) {
 
     private val playerListener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
-            syncState(player)
+            // Walking the timeline is O(queue); only do it when it can have moved.
+            val timelineChanged = events.containsAny(
+                Player.EVENT_TIMELINE_CHANGED,
+                Player.EVENT_MEDIA_ITEM_TRANSITION,
+                Player.EVENT_MEDIA_METADATA_CHANGED,
+                Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED,
+            )
+            syncState(player, rebuildQueue = timelineChanged)
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -73,17 +90,15 @@ class PlayerConnection(context: Context) {
         } ?: return
         controller = connected
         connected.addListener(playerListener)
-        syncState(connected)
+        syncState(connected, rebuildQueue = true)
     }
 
-    private fun syncState(player: Player) {
+    private fun syncState(player: Player, rebuildQueue: Boolean) {
         val metadata = player.mediaMetadata
         val albumId = metadata.extras?.getLong(MediaItems.EXTRA_ALBUM_ID)?.takeIf { it > 0L }
         val duration = player.duration.let { if (it == C.TIME_UNSET || it < 0L) 0L else it }
-        val queue = ArrayList<QueueEntry>(player.mediaItemCount)
-        for (index in 0 until player.mediaItemCount) {
-            queue += MediaItems.toQueueEntry(index, player.getMediaItemAt(index))
-        }
+        val position = player.currentPosition.coerceAtLeast(0L)
+        val queue = if (rebuildQueue) buildQueue(player) else _state.value.queue
         _state.update { previous ->
             previous.copy(
                 isConnected = true,
@@ -95,14 +110,25 @@ class PlayerConnection(context: Context) {
                 album = metadata.albumTitle?.toString().orEmpty(),
                 albumId = albumId,
                 artworkUri = metadata.artworkUri?.toString(),
+                positionMs = position,
                 durationMs = duration,
-                positionMs = player.currentPosition.coerceAtLeast(0L),
                 shuffleEnabled = player.shuffleModeEnabled,
                 repeatMode = RepeatMode.fromPlayerMode(player.repeatMode),
                 queue = queue,
                 currentIndex = player.currentMediaItemIndex,
             )
         }
+        PlayerProgress(positionMs = position, durationMs = duration).let { next ->
+            if (_progress.value != next) _progress.value = next
+        }
+    }
+
+    private fun buildQueue(player: Player): List<QueueEntry> {
+        val queue = ArrayList<QueueEntry>(player.mediaItemCount)
+        for (index in 0 until player.mediaItemCount) {
+            queue += MediaItems.toQueueEntry(index, player.getMediaItemAt(index))
+        }
+        return queue
     }
 
     private suspend fun positionTicker() {
@@ -111,13 +137,8 @@ class PlayerConnection(context: Context) {
             if (player != null && player.isPlaying) {
                 val position = player.currentPosition.coerceAtLeast(0L)
                 val duration = player.duration.let { if (it == C.TIME_UNSET || it < 0L) 0L else it }
-                _state.update { current ->
-                    if (current.positionMs != position || current.durationMs != duration) {
-                        current.copy(positionMs = position, durationMs = duration)
-                    } else {
-                        current
-                    }
-                }
+                val next = PlayerProgress(positionMs = position, durationMs = duration)
+                if (_progress.value != next) _progress.value = next
             }
             delay(POSITION_TICK_MS)
         }
@@ -125,25 +146,37 @@ class PlayerConnection(context: Context) {
 
     // ----------------------------------------------------------------- commands
 
-    /** Replaces the queue with [tracks] and starts playing at [startIndex]. */
+    /**
+     * Replaces the queue with [tracks] and starts playing at [startIndex].
+     *
+     * Mapping tracks to MediaItems allocates one metadata bundle each, so for a
+     * large library it runs off the main thread: the tap stays instant and the
+     * player is touched on the main thread afterwards.
+     */
     fun play(tracks: List<Track>, startIndex: Int = 0) {
         val player = controller ?: return
         if (tracks.isEmpty()) return
-        val items: List<MediaItem> = tracks.map(MediaItems::fromTrack)
-        player.setMediaItems(items, startIndex.coerceIn(0, items.lastIndex), 0L)
-        player.prepare()
-        player.play()
+        val start = startIndex.coerceIn(0, tracks.lastIndex)
+        scope.launch {
+            val items = withContext(Dispatchers.Default) { tracks.map(MediaItems::fromTrack) }
+            player.setMediaItems(items, start, 0L)
+            player.prepare()
+            player.play()
+        }
     }
 
     /** Shuffles [tracks] and starts with the one at [startIndex] as the seed. */
     fun shuffleAndPlay(tracks: List<Track>, startIndex: Int = 0) {
         val player = controller ?: return
         if (tracks.isEmpty()) return
-        val items = tracks.map(MediaItems::fromTrack)
-        player.setMediaItems(items, startIndex.coerceIn(0, items.lastIndex), 0L)
-        player.shuffleModeEnabled = true
-        player.prepare()
-        player.play()
+        val start = startIndex.coerceIn(0, tracks.lastIndex)
+        scope.launch {
+            val items = withContext(Dispatchers.Default) { tracks.map(MediaItems::fromTrack) }
+            player.setMediaItems(items, start, 0L)
+            player.shuffleModeEnabled = true
+            player.prepare()
+            player.play()
+        }
     }
 
     fun togglePlayPause() {
@@ -171,7 +204,11 @@ class PlayerConnection(context: Context) {
     }
 
     fun seekTo(positionMs: Long) {
-        controller?.seekTo(positionMs.coerceAtLeast(0L))
+        val player = controller ?: return
+        val target = positionMs.coerceAtLeast(0L)
+        player.seekTo(target)
+        // Move the hairline immediately instead of waiting for the next tick.
+        _progress.update { it.copy(positionMs = target) }
     }
 
     fun toggleShuffle() {
