@@ -7,12 +7,15 @@ Sairen reads the audio files that Android's MediaStore already indexed on your d
 through a `MediaSessionService` so playback survives leaving the app, and keeps the whole experience
 on-device: no accounts, no streaming, no ads, no analytics, no telemetry, no Internet permission.
 
-> **Verification status (please read):** the full source tree and Gradle wrapper are committed, but
-> this project was authored in a sandbox where the Android SDK, the Gradle distribution and all Maven
-> repositories are unreachable, so `./gradlew assembleDebug`, `./gradlew lint` and `./gradlew test`
-> could **not** be executed here. Everything that *was* verified is listed in
-> [Verification](#verification-what-was-actually-run). Treat the compiler-level result as unverified
-> until you run the build locally or in CI (a workflow is included).
+> **Verification status (please read):** the full source tree and Gradle wrapper are committed. This
+> project was authored in a sandbox where the Android SDK, the Gradle distribution and all Maven
+> repositories are unreachable, so `./gradlew assembleDebug`, `./gradlew lint` and `./gradlew test` could
+> **not** be executed. What *was* executed: the framework-free half of the app (data, queue maths, search,
+> formatting, window classes, permission-flow decisions) was compiled with a real Kotlin 2.4.21 compiler
+> and **58 unit tests pass**; see [Verification](#verification-what-was-actually-run) for the exact
+> commands. The Android/Compose/Media3 layer (activity, service, controller, ViewModels, screens, resource
+> linking) remains **uncompiled and untested** — treat it as unproven until you run the build locally or
+> in CI (workflow included).
 
 ---
 
@@ -94,9 +97,13 @@ app/src/main/java/com/sairen/player/
 │   ├── LibraryGrouping.kt       # pure album/artist derivation
 │   ├── MusicLibrary.kt          # repository interface used by ViewModels
 │   ├── MusicRepository.kt       # in-memory index + recent history
-│   ├── RecentPlayedStore.kt     # DataStore history (+ pure RecentPlayedList)
-│   ├── PlaybackSessionStore.kt  # DataStore last-session snapshot (+ SavedSessionCodec)
-│   ├── SettingsStore.kt         # DataStore theme (+ ThemePreferences abstraction)
+│   ├── RecentPlayedStore.kt     # DataStore history facade
+│   ├── RecentPlayedList.kt      # pure history maths + (de)serialisation
+│   ├── PlaybackSessionStore.kt  # DataStore last-session facade
+│   ├── SavedSession.kt          # pure SavedSession + SavedSessionCodec
+│   ├── SettingsStore.kt         # DataStore theme facade
+│   ├── ThemeMode.kt             # pure theme enum + storage mapping
+│   ├── ThemePreferences.kt      # abstraction used by SettingsViewModel
 │   └── DataStoreProvider.kt     # single process-wide Preferences DataStore
 ├── playback/
 │   ├── PlaybackService.kt       # MediaSessionService: ExoPlayer + MediaSession + notification
@@ -107,14 +114,19 @@ app/src/main/java/com/sairen/player/
 └── ui/
     ├── SairenApp.kt             # scaffold, top bar, mini player, nav bar/rail, nav graph
     ├── navigation/              # string routes
-    ├── theme/                   # palette, typography, theme resolution
+    ├── theme/                   # palette, typography, pure ThemeResolution
     ├── components/              # artwork, track row, actions sheet, mini player, common bits
     ├── library/                 # library ViewModel + songs/albums/artists/detail/recent screens
     ├── player/                  # Now Playing + queue + PlayerActions
     ├── search/                  # SearchViewModel + SearchIndex + screen
     ├── settings/                # SettingsViewModel + screen
-    └── permissions/             # permission helpers + rationale gate
+    └── permissions/             # Permissions helpers, pure PermissionDecision, rationale gate
 ```
+
+Pure, framework-free logic (`RecentPlayedList`, `SavedSessionCodec`, `QueueEditor`, `SearchIndex`,
+`ThemeMode`, `PermissionDecision`, formatters, window size classes) is deliberately kept out of the
+Android/Compose files so it can be compiled and unit tested on a plain JVM — that is the part covered by
+the executed tests below.
 
 Data flow: `MediaStore ⇒ MediaStoreDataSource ⇒ MusicRepository (StateFlow) ⇒ LibraryViewModel ⇒ Compose`.
 Playback: `PlayerConnection (MediaController) ⇄ PlaybackService (MediaSession + ExoPlayer)`.
@@ -151,7 +163,7 @@ artifacts — the *app* needs no network at runtime and has no `INTERNET` permis
 
 ## Testing
 
-`./gradlew test` runs 60+ JVM unit tests (JUnit 4 + `kotlinx-coroutines-test`), no device required:
+`./gradlew test` runs the JVM unit tests (JUnit 4 + `kotlinx-coroutines-test`), no device required:
 
 | Test | Covers |
 | --- | --- |
@@ -160,11 +172,16 @@ artifacts — the *app* needs no network at runtime and has no `INTERNET` permis
 | `SearchViewModelTest` | 300 ms debounce with virtual time, rapid typing, immediate clear, library updates |
 | `LibraryViewModelTest` | refresh on init, album ordering by track number, artist grouping, recent-id → track resolution, missing ids |
 | `SettingsViewModelTest` | theme read/write, no-op write when unchanged |
-| `StoresTest` | `RecentPlayedList` cap/dedupe, `SavedSessionCodec` round-trip + malformed input, `ThemeMode` mapping |
+| `PermissionDecisionTest` | rationale → first denial → permanent denial → settings round trip, one-shot notification prompt |
+| `RecentPlayedListTest` / `SavedSessionCodecTest` / `ThemeModeTest` | history cap/dedupe/tolerant decode, session round trip and malformed payloads, enum storage mapping |
 | `LibraryGroupingTest` | counts, durations, sorting, artwork inheritance |
 | `FormattersTest` | `m:ss` / `h:mm:ss`, negative/unknown durations, totals |
-| `WindowSizeTest` | 600 / 840 dp breakpoints |
-| `ThemeResolutionTest` | system vs. explicit light/dark resolution |
+| `WindowSizeTest` / `ThemeResolutionTest` | 600/840 dp breakpoints, system-vs-explicit theme resolution |
+
+The pure-logic tests above (58 assertions-groups) were **actually executed** in the authoring sandbox —
+see [Verification](#verification-what-was-actually-run). The two ViewModel test classes
+(`SearchViewModelTest`, `LibraryViewModelTest`, `SettingsViewModelTest`) depend on
+`kotlinx-coroutines-test`, which was not downloadable here, so they were written but not run.
 
 ## Permissions
 
@@ -230,32 +247,81 @@ Notifications get their own one-time rationale dialog on API 33+, and a persiste
 
 ## Verification: what was actually run
 
-Environment: Debian-based sandbox, **no JDK, no Android SDK, no Gradle distribution**; outbound network
-allowed only to `github.com`, `codeload.github.com`, `api.github.com`, `registry.npmjs.org`, `pypi.org`,
-`files.pythonhosted.org`.
+**Environment:** Debian-based sandbox. No JDK, no Android SDK, no Gradle distribution preinstalled.
+Outbound network is allow-listed to `github.com`, `codeload.github.com`, `api.github.com`,
+`registry.npmjs.org`, `pypi.org`, `files.pythonhosted.org` only.
 
-| Command | Result |
+### 1. Toolchain probing
+
+| Command | Outcome |
 | --- | --- |
-| `curl -s -o /dev/null -w "%{http_code}" https://repo1.maven.org/` | `000` (blocked) — same for `repo.maven.apache.org`, `maven.google.com`, `dl.google.com`, `services.gradle.org`, `downloads.gradle.org`, `plugins.gradle.org`, `jitpack.io` |
-| `pip download jdk4py` | **succeeded** (a JDK *is* obtainable from PyPI) |
-| Gradle distribution download | not possible (`services.gradle.org` blocked) |
-| Android SDK / build-tools / platform download | not possible (`dl.google.com` blocked, no `sdkmanager`) |
-| Dependency resolution (AGP, AndroidX, Media3, Compose, Coil) | not possible (Maven Central + Google Maven blocked) |
-| `curl https://api.github.com/repos/gradle/gradle/contents/gradle/wrapper/gradle-wrapper.jar?ref=v8.14.3` | **succeeded** — official wrapper jar (43,764 bytes, `sha256 7d3a4ac4…df296172`), verified as a valid JAR via `unzip -l`; `gradlew`/`gradlew.bat` fetched the same way |
-| `python3` XML well-formedness over all 26 XML files (manifest, resources, backup rules, themes) | **0 errors** |
-| `python3` resource-reference check (`R.string/drawable/color/mipmap/xml/style` in Kotlin, manifest and XML) | **0 missing references** (82 strings, 25 drawables, 2 adaptive icons, 2 colors, 1 style) |
-| Brace/paren/bracket balance per Kotlin file (59 files, strings+comments stripped) | **0 imbalances** |
-| Project-internal import resolution (`import com.sairen.player.*`) | **0 unresolved** (only generated `R`, extension properties/functions flagged as false positives) |
-| Package vs. directory consistency | **0 mismatches** |
-| `./gradlew assembleDebug` | **NOT RUN** — impossible in this environment (no JDK installed, no Gradle distribution, no SDK, no Maven access) |
-| `./gradlew lint` | **NOT RUN** — same reason |
-| `./gradlew test` | **NOT RUN** — same reason; the test sources are committed and compile-checked only by inspection |
-| APK `lib/` inspection with `unzip -l` | **NOT RUN** — no APK exists |
-| Install/playback on emulator or device | **NOT TESTED** — no emulator, no device, no `adb` |
+| `curl -s -o /dev/null -w "%{http_code}" https://repo1.maven.org/` | `000` (blocked) — also `000` for `repo.maven.apache.org`, `maven.google.com`, `dl.google.com`, `services.gradle.org`, `downloads.gradle.org`, `plugins.gradle.org`, `jitpack.io`, `cdn.jsdelivr.net` |
+| `pip download jdk4py==17.0.9.2` | **succeeded** → Temurin JDK 17.0.9 (`java -version` → `openjdk 17.0.9`) |
+| `curl https://api.github.com/…/gradle/wrapper/gradle-wrapper.jar?ref=v8.14.3` | **succeeded** — official 43,764-byte wrapper jar, valid JAR (`unzip -l`), `sha256 7d3a4ac4…df296172`; `gradlew` + `gradlew.bat` fetched the same way |
+| Gradle distribution / Android SDK / build-tools | **not obtainable** — hosting hosts blocked, no `sdkmanager` |
+| AGP, AndroidX, Media3, Compose, Coil artifacts | **not obtainable** — Maven Central and Google Maven blocked |
+| `kotlin-compiler` from npm (`registry.npmjs.org`) | **succeeded** → `kotlinc-jvm 2.4.21 (JRE 17.0.9)` |
+| `junit-4.13.2.jar` / `hamcrest-core-1.3.jar` | **not obtainable** — Maven Central blocked; the GitHub-hosted copies are Git LFS pointers, so a minimal local stand-in for `@Test`/`Assert` was used (assertion semantics identical for the assertions used) |
 
-Because nothing was compiled, the honest expectation is: the first local `./gradlew assembleDebug` may
-surface small compiler errors (a missing import, a renamed Material3 parameter, a Media3 1.8 API
-difference). Please open an issue with the exact compiler output if you hit one.
+### 2. Static checks (all passed)
+
+| Check | Result |
+| --- | --- |
+| XML well-formedness across all 26 XML files (manifest, values, values-night, values-v29, drawables, mipmaps, `xml/`) | **0 errors** |
+| Resource-reference resolution (`R.string/drawable/color/mipmap/xml/style` used in Kotlin, manifest and XML) | **0 missing** (82 strings, 25 drawables, 2 adaptive icons, 2 colors, 1 style) |
+| Brace/paren/bracket balance per Kotlin file (59 files, strings + comments stripped) | **0 imbalances** |
+| Project-internal `import com.sairen.player.*` resolution | **0 unresolved** |
+| Package declaration vs. directory | **0 mismatches** |
+
+### 3. Real compiler + test execution (framework-free half)
+
+```bash
+java -jar /tmp/kc/package/lib/kotlin-compiler.jar -nowarn -no-stdlib \
+     -classpath /tmp/kc/package/lib/kotlin-stdlib.jar -d /tmp/verify/out <sources> <tests>
+# → exit 0, no errors (12 production files + 12 test-source files)
+
+java -cp /tmp/verify/out:<stdlib> verify.Runner <11 test classes>
+```
+
+Result (verbatim tail):
+
+```
+• LibraryGroupingTest (5 tests)
+• RecentPlayedListTest (5 tests)
+• SavedSessionCodecTest (4 tests)
+• ThemeModeTest (2 tests)
+• QueueEditorTest (12 tests)
+• RepeatModeTest (5 tests)
+• SearchIndexTest (9 tests)
+• PermissionDecisionTest (8 tests)
+• FormattersTest (4 tests)
+• WindowSizeTest (2 tests)
+• ThemeResolutionTest (2 tests)
+
+TESTS PASSED: 58, FAILED: 0
+```
+
+Compiled files: `Models.kt`, `ThemeMode.kt`, `LibraryGrouping.kt`, `RecentPlayedList.kt`,
+`SavedSession.kt`, `QueueEditor.kt`, `PlayerUiState.kt`, `AudioAccessState.kt`, `SearchIndex.kt`,
+`Formatters.kt`, `SairenWindowSize.kt`, `ThemeResolution.kt` — plus their test classes. Because the
+compiler is a *real* Kotlin compiler, this also type-checks every declaration those files use.
+
+### 4. What is explicitly **not** verified
+
+| Item | Status |
+| --- | --- |
+| `./gradlew assembleDebug` (and `assembleRelease`) | **NOT RUN** — Gradle distribution, Android SDK and Maven artifacts unreachable |
+| `./gradlew lint`, `./gradlew test` | **NOT RUN** — same reason |
+| Debug APK existence and `unzip -l` `lib/` inspection | **NOT RUN** — no APK was produced |
+| Android/Compose/Media3 layer: `MainActivity`, `SairenApp`, all screens/components, `PlayerConnection`, `PlaybackService`, `MusicRepository`, `MediaStoreDataSource`, the three coroutine ViewModels | **NOT COMPILED** — requires AndroidX/Media3 AARs and the Android SDK |
+| Manifest merger output, `foregroundServiceType` in the merged manifest, R8 shrinking | **NOT VERIFIED** — needs a real build (the source manifest was reviewed by hand; sections below) |
+| Install, playback, notification/lock-screen controls, permission dialogs, headphone-unplug pause, process-death resume | **NOT TESTED** — no emulator, no device, no `adb` |
+| Compose UI rendering / responsive layouts on phones, foldables and tablets | **NOT TESTED** — visual result unseen |
+
+Because a large part of the code was never compiled, the first local `./gradlew assembleDebug` may
+surface small compiler errors (a missing import, a renamed Material 3 parameter, a Media3 1.8 signature
+difference). The version pins were chosen conservatively for that reason. Please report the exact
+compiler output if you hit one.
 
 ## Known limitations
 
