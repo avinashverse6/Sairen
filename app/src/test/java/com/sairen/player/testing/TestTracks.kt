@@ -11,6 +11,7 @@ fun track(
     albumId: Long = id,
     durationMs: Long = 180_000L,
     trackNumber: Int = 0,
+    dateAddedMs: Long = 0L,
 ): Track = Track(
     id = id,
     title = title,
@@ -21,4 +22,5 @@ fun track(
     uri = "content://media/external/audio/media/$id",
     artworkUri = null,
     trackNumber = trackNumber,
+    dateAddedMs = dateAddedMs,
 )

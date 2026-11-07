@@ -36,6 +36,7 @@ class MediaStoreDataSource(
             MediaStore.Audio.Media.DURATION,
             MediaStore.Audio.Media.TRACK,
             MediaStore.Audio.Media.DISPLAY_NAME,
+            MediaStore.Audio.Media.DATE_ADDED,
         )
 
         val selection = buildString {
@@ -66,6 +67,7 @@ class MediaStoreDataSource(
                 val trackColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
                 val displayNameColumn =
                     cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+                val dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
 
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idColumn)
@@ -90,6 +92,8 @@ class MediaStoreDataSource(
                             .toString(),
                         artworkUri = albumArtworkUri(albumId),
                         trackNumber = cursor.getInt(trackColumn),
+                        // DATE_ADDED is seconds since the epoch.
+                        dateAddedMs = cursor.getLong(dateAddedColumn) * 1_000L,
                     )
                 }
             }

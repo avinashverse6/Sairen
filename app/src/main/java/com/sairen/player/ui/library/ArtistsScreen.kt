@@ -1,6 +1,7 @@
 package com.sairen.player.ui.library
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -27,7 +28,6 @@ import com.sairen.player.data.model.Artist
 import com.sairen.player.data.model.LibraryState
 import com.sairen.player.ui.components.Artwork
 import com.sairen.player.ui.components.EmptyState
-import com.sairen.player.ui.components.LoadingState
 
 @Composable
 fun ArtistsScreen(
@@ -39,7 +39,8 @@ fun ArtistsScreen(
 ) {
     val artists = state.library.artists
     when {
-        state.isLoading && !state.hasLoadedOnce -> LoadingState(modifier = modifier)
+        // First scan in flight: render nothing rather than a spinner.
+        !state.hasLoadedOnce -> Box(modifier = modifier.fillMaxSize())
         artists.isEmpty() -> EmptyState(
             title = stringResource(R.string.library_empty_title),
             message = stringResource(R.string.library_empty_message),

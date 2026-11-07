@@ -7,17 +7,21 @@ Sairen reads the audio files that Android's MediaStore already indexed on your d
 through a `MediaSessionService` so playback survives leaving the app, and keeps the whole experience
 on-device: no accounts, no streaming, no ads, no analytics, no telemetry, no Internet permission.
 
-> **Verification status (please read):** the whole app now **builds in CI**. GitHub Actions
-> (`.github/workflows/android.yml`, run `42212827921` on 2026-11-06) ran the real Gradle build:
-> `:app:compileDebugKotlin` and `:app:compileDebugUnitTestKotlin` succeed, **71 unit tests execute in 14
-> classes with 0 failures and 0 skipped**, `lintDebug` passes, and `assembleDebug` produces
-> `app-debug.apk` (15,646 KiB) whose `lib/` contents were inspected and uploaded as an artifact. Two real
-> defects that this first compile exposed were fixed rather than papered over (see
-> [CI build and the two bugs it caught](#4-ci-build-and-the-two-bugs-it-caught)). What is still *not*
-> verified: installing the APK, actual playback, notifications/lock-screen controls, and any on-device
-> rendering — there was no device or emulator. Earlier in authoring, only the framework-free half of the
-> code could be exercised (a real Kotlin 2.4.21 compiler, 58 pure-logic tests); that sandbox evidence is
-> kept in [Verification](#verification-what-was-actually-run).
+> **Verification status (please read):** the whole app **builds and tests green in CI**. GitHub Actions
+> (`.github/workflows/android.yml`, run `42239888376` on 2026-11-06) ran the real Gradle build:
+> `:app:compileDebugKotlin` and `:app:compileDebugUnitTestKotlin` succeed, **140 unit tests execute in 22
+> classes with 0 failures and 0 skipped**, `lintDebug` passes, and **both** `assembleDebug` and
+> `assembleRelease` produce APKs — `app-debug.apk` (15,774 KiB) and `app-release.apk` (2,773 KiB, R8 +
+> resource shrinking, signed with the debug key) — whose `lib/` contents were inspected: only
+> `arm64-v8a` and `armeabi-v7a`. Five real defects that compiling exposed were fixed rather than papered
+> over (two in phase 2, three in phase 3 — see
+> [CI build and the bugs it caught](#4-ci-build-and-the-bugs-it-caught)). What is still *not* verified:
+> installing the APK, actual playback, notifications/lock-screen controls, any on-device rendering, and
+> whether the release build behaves like the debug build at runtime. There is no device or emulator here,
+> so **no claim is made about real-world smoothness**; the jank work is described by what it changes in
+> the code, not by a measured frame time. Earlier in authoring only the framework-free half could be
+> exercised (a real Kotlin compiler, 118 pure-logic tests); that sandbox evidence is kept in
+> [Verification](#verification-what-was-actually-run).
 
 ---
 
@@ -33,7 +37,7 @@ on-device: no accounts, no streaming, no ads, no analytics, no telemetry, no Int
 - [ABI notes](#abi-notes)
 - [Performance notes](#performance-notes)
 - [Verification: what was actually run](#verification-what-was-actually-run)
-- [CI build and the two bugs it caught](#4-ci-build-and-the-two-bugs-it-caught)
+- [CI build and the bugs it caught](#4-ci-build-and-the-bugs-it-caught)
 - [Known limitations](#known-limitations)
 - [Attribution](#attribution)
 
@@ -44,12 +48,17 @@ on-device: no accounts, no streaming, no ads, no analytics, no telemetry, no Int
 | Area | What Sairen does |
 | --- | --- |
 | Discovery | MediaStore query with `IS_MUSIC != 0`, `DURATION >= 30s`, `SIZE >= 100 KiB`; embedded album art via `content://media/external/audio/albumart/<albumId>`, with a placeholder when the device has no art |
-| Library | Songs / Albums / Artists tabs, album and artist detail screens, derived groupings (no extra cursors) |
+| Library | Songs / Albums / Artists / Playlists tabs, album and artist detail screens, derived groupings (no extra cursors). The first scan is **silent**: no spinner, banner or "scanning" text anywhere in the startup path |
+| Collections | Chips over the song list: All, Liked, Recently added (newest first, capped at 100), Most played (zero-play tracks hidden), Recently played, Not played. Play and Shuffle act on the filtered list only |
+| Likes | Heart toggle on every song row, in the track actions sheet, on Now Playing and in the mini player; liked ids persist in DataStore |
+| Playlists | Create, rename, delete, add/remove songs, reorder with up/down; playlist detail screen with Play/Shuffle and a "N missing" note when files disappeared |
+| Play counts | One count per listen, awarded only after 30 s or half the track, whichever comes first — never on start, seek or resume |
 | Search | Debounced (300 ms), case-insensitive, token-based match over title + artist + album, ranked (title prefix → title → artist → album) |
 | Transport | Play, pause, next, previous (restarts the track when >3 s in), seek bar with elapsed/total |
 | Modes | Shuffle and repeat off/all/one, driven by the Media3 player so the notification stays in sync |
 | Queue | Reorder (up/down), remove, play next, add to queue; play any queue item directly |
 | History | Recently played (last 50) persisted in DataStore, shown as a shelf and a full list |
+| Visuals | Near-black surfaces with a `#1DB954` accent, rounded cards and chips, a 2 dp progress hairline in the mini player, and a Now Playing backdrop tinted from the cover art (computed on a 24×24 decode, no new dependency) |
 | Background | `MediaSessionService` + `MediaSession`: notification, lock-screen and Bluetooth/headset controls, Android Auto/assistant compatible |
 | Audio behaviour | Audio focus handled by ExoPlayer (`handleAudioFocus = true`), pause on headphone unplug (`setHandleAudioBecomingNoisy(true)`), last queue/position restored paused on next launch |
 | Theming | Dark, Light and System default, persisted in DataStore |
@@ -57,15 +66,18 @@ on-device: no accounts, no streaming, no ads, no analytics, no telemetry, no Int
 
 ## Screens
 
-1. **Songs** — recently played shelf + full song list.
+1. **Songs** — recently played shelf + collection chips + the filtered song list.
 2. **Albums** — responsive grid; **Albums detail** — header with play/shuffle + track list in disc order.
 3. **Artists** — list; **Artist detail** — album shelf + all songs.
-4. **Search** — full-screen field with grouped results (albums → artists → songs).
-5. **Now Playing** — expandable (`slideInVertically` from the mini player), large artwork with a subtle
-   scale animation tied to play state, seek bar, transport row, queue sheet (phones) or third pane (tablets).
-6. **Recently played** — the persisted history.
-7. **Settings** — theme, notification status, rescan, about.
-8. **Permission gate** — rationale before the system dialog; "Open settings" when permanently denied.
+4. **Playlists** — every playlist with a per-row menu (rename, delete); **Playlist detail** — Play/Shuffle,
+   total duration, reorderable rows, like and remove actions.
+5. **Search** — full-screen field with grouped results (albums → artists → songs).
+6. **Now Playing** — expandable (`slideInVertically` from the mini player), large artwork over a gradient
+   tinted from that artwork, a scale animation tied to play state, heart toggle, seek bar, transport row,
+   queue sheet (phones) or third pane (tablets).
+7. **Recently played** — the persisted history.
+8. **Settings** — theme, notification status, rescan (the only place a scan shows any feedback), about.
+9. **Permission gate** — rationale before the system dialog; "Open settings" when permanently denied.
 
 ## Tech stack
 
@@ -99,6 +111,14 @@ app/src/main/java/com/sairen/player/
 │   ├── model/Models.kt          # Track / Album / Artist / LibrarySnapshot / LibraryState (framework-free)
 │   ├── MediaStoreDataSource.kt  # one cursor query on Dispatchers.IO
 │   ├── LibraryGrouping.kt       # pure album/artist derivation
+│   ├── LikedTracks.kt           # pure: liked-id set (de)serialisation
+│   ├── LikedStore.kt            # DataStore likes facade
+│   ├── PlayCountRules.kt        # pure: when a listen counts (30 s or half the track)
+│   ├── PlayCounts.kt            # pure: play-count map (de)serialisation
+│   ├── PlayCountStore.kt        # DataStore play-count facade
+│   ├── Playlist.kt              # pure: Playlist + PlaylistCodec + PlaylistEditor (add/remove/move)
+│   ├── PlaylistStore.kt         # DataStore playlist facade
+│   ├── SongCollections.kt       # pure: the six song-list projections
 │   ├── MusicLibrary.kt          # repository interface used by ViewModels
 │   ├── MusicRepository.kt       # in-memory index + recent history
 │   ├── RecentPlayedStore.kt     # DataStore history facade
@@ -113,14 +133,16 @@ app/src/main/java/com/sairen/player/
 │   ├── PlaybackService.kt       # MediaSessionService: ExoPlayer + MediaSession + notification
 │   ├── PlayerConnection.kt      # MediaController wrapper → StateFlow<PlayerUiState>
 │   ├── PlayerUiState.kt         # UI model + RepeatMode
+│   ├── PlayerProgress.kt        # position/duration only, published at 500 ms
 │   ├── MediaItems.kt            # Track → MediaItem mapping (album id in extras)
 │   └── QueueEditor.kt           # pure queue index maths (move/remove/play-next)
 └── ui/
     ├── SairenApp.kt             # scaffold, top bar, mini player, nav bar/rail, nav graph
     ├── navigation/              # string routes
     ├── theme/                   # palette, typography, pure ThemeResolution
-    ├── components/              # artwork, track row, actions sheet, mini player, common bits
-    ├── library/                 # library ViewModel + songs/albums/artists/detail/recent screens
+    ├── components/              # artwork, track row (+like), actions sheet, playlist dialogs,
+    │                            # mini player, artwork palette/gradient, common bits
+    ├── library/                 # library ViewModel + songs/albums/artists/playlists/detail/recent screens
     ├── player/                  # Now Playing + queue + PlayerActions
     ├── search/                  # SearchViewModel + SearchIndex + screen
     ├── settings/                # SettingsViewModel + screen
@@ -151,8 +173,9 @@ Requirements: JDK 17, Android SDK with **platform 36** and **build-tools 36.0.0*
 # Android lint
 ./gradlew lint
 
-# Release build (R8 minify + resource shrinking are on)
+# Release build (R8 minify + resource shrinking are on, debug-key signed so it installs)
 ./gradlew assembleRelease
+# → app/build/outputs/apk/release/app-release.apk
 ```
 
 Install:
@@ -181,8 +204,15 @@ artifacts — the *app* needs no network at runtime and has no `INTERNET` permis
 | `LibraryGroupingTest` | counts, durations, sorting, artwork inheritance |
 | `FormattersTest` | `m:ss` / `h:mm:ss`, negative/unknown durations, totals |
 | `WindowSizeTest` / `ThemeResolutionTest` | 600/840 dp breakpoints, system-vs-explicit theme resolution |
+| `PlayCountRulesTest` | 30 s vs. half-duration, whichever is smaller; unknown/zero durations; nothing counted on start, seek or resume |
+| `PlayCountsTest` | count payload round trip, corrupt and out-of-range input, monotonic increment |
+| `LikedTracksTest` | liked-id set round trip, ordering, malformed payloads |
+| `PlaylistCodecTest` / `PlaylistEditorTest` | playlist payload round trip, name escaping, add/remove/move maths, duplicate ids, missing tracks |
+| `SongCollectionsTest` | all six collections: ordering, the 100-track cap, zero-play filtering, dedupe, unresolved ids |
+| `ArtworkPaletteTest` | accent extraction: alpha and luminance filters, saturation weighting, channel floor, fallback colour |
+| `LibraryActionsViewModelTest` | like/playlist/play-count changes through the ViewModel seam, including a missing track |
 
-All 14 test classes (**71 tests**) run in CI on every push, and the workflow publishes the numbers
+All 22 test classes (**140 tests**) run in CI on every push, and the workflow publishes the numbers
 (class by class) as a check-run annotation. `LibraryViewModelTest` (6), `SearchViewModelTest` (4) and
 `SettingsViewModelTest` (3) are the coroutine-ViewModel tests: they use `kotlinx-coroutines-test` with a
 `MainDispatcherRule` and virtual time, and they compile and pass in CI (`0 failed, 0 skipped`).
@@ -204,6 +234,9 @@ Explicitly **not** requested: `MANAGE_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE
 `WAKE_LOCK` appears in the merged manifest it comes from Media3's playback handling, which is the
 minimum needed for background audio.
 
+Phase 3 added **no permission**: likes, play counts and playlists live in the app's own DataStore file,
+which needs none.
+
 Flow: an in-app rationale screen explains *why* before the system dialog appears. If the user denies
 twice (system stops showing the dialog), the screen switches to a "permission is off, open settings"
 state with an `ACTION_APPLICATION_DETAILS_SETTINGS` button and re-checks the grant on `ON_RESUME`.
@@ -224,8 +257,8 @@ Notifications get their own one-time rationale dialog on API 33+, and a persiste
 
 - `defaultConfig.ndk.abiFilters = ["armeabi-v7a", "arm64-v8a"]`, and `splits.abi` is disabled, so
   `assembleDebug` produces **one universal APK** that carries both 32-bit and 64-bit ARM code.
-- **Measured in CI**, not assumed: `app-debug.apk` is 15,646 KiB and its `lib/` contains exactly four
-  native libraries, all of them ARM:
+- **Measured in CI**, not assumed: `app-debug.apk` is 15,774 KiB, `app-release.apk` (R8) is 2,773 KiB, and
+  both APKs' `lib/` contains exactly four native libraries, all of them ARM:
 
   | Library | ABI | Size |
   | --- | --- | --- |
@@ -244,6 +277,7 @@ Notifications get their own one-time rationale dialog on API 33+, and a persiste
 
   ```bash
   unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -E 'lib/|\.so' || echo "no native libs"
+  unzip -l app/build/outputs/apk/release/app-release.apk | grep -E 'lib/|\.so' || echo "no native libs"
   ```
 
   The CI workflow prints the same listing and turns it into a check-run annotation, so the contents are
@@ -253,14 +287,36 @@ Notifications get their own one-time rationale dialog on API 33+, and a persiste
 
 ## Performance notes
 
+Phase 3 went looking for the causes of the reported jank instead of guessing, and changed only what was
+demonstrably wasteful:
+
+- **Playback position no longer rebuilds the UI.** `PlayerConnection` used to emit a whole
+  `PlayerUiState` copy five times a second, which recomposed the mini player, the queue and Now Playing
+  on every tick. Position now travels on its own `PlayerProgress` flow, consumed *only* by the seek bar
+  (`SeekSection`) and by `MiniPlayerProgressLine` — in the common case a tick redraws one 2 dp line.
+  `PlayerUiState` is rebuilt on four Media3 events only: timeline, media-item transition, shuffle and
+  metadata.
+- **No work per recomposition.** `Artwork` remembers its Coil `ImageRequest` per `(uri, size)` instead of
+  building a new request (and cache key) on every frame, and asks Coil for the size it will draw at
+  rather than decoding full-resolution covers into list rows.
+- **The startup scan is invisible, so it also stops churning the tree.** No loader swaps in and out while
+  MediaStore is queried; the list appears once, with stable `LazyColumn` keys (`track.id`,
+  `entry.track.id`, `playlist.id`), so scroll position and item state survive collection switches.
+- **Colour extraction stays off the main thread.** The Now Playing accent decodes a 24×24 bitmap via Coil
+  in a `produceState` coroutine, averages it with a pure-Kotlin function, and applies one
+  `Brush.linearGradient`; no Palette dependency, no `MediaMetadataRetriever`, no bitmap kept alive.
+- **Tap handlers do no allocations**: the collection projection is memoised with `remember` on its inputs,
+  so tapping a row plays the already-computed list rather than re-sorting the library.
 - Cold start does no I/O on the main thread: `AppContainer` only constructs stores; the MediaStore scan
-  runs on `Dispatchers.IO` after the first frame, and the album/artist grouping runs on
-  `Dispatchers.Default`.
-- Lists are `LazyColumn`/`LazyVerticalGrid` with stable keys; search precomputes lowercase haystacks once
-  per library load and runs on `Dispatchers.Default`.
-- One cursor query per scan; no per-track queries, no polling.
-- Release builds enable R8 (`isMinifyEnabled`) and resource shrinking; the dependency list is kept to
-  seven runtime artifacts plus the Compose BOM.
+  runs on `Dispatchers.IO` after the first frame, and grouping runs on `Dispatchers.Default`.
+- One cursor query per scan; no per-track queries, no polling. Search precomputes lowercase haystacks once
+  per library load.
+- Release builds enable R8 (`isMinifyEnabled`) and resource shrinking; the dependency list is still seven
+  runtime artifacts plus the Compose BOM — the palette was written by hand rather than adding one.
+
+**Honest gap:** none of the above was measured on a device. The debug build carries `isDebuggable`, so
+Compose skips its own optimisations there; `app-release.apk` exists precisely so the same code can be
+judged with R8 on, but its runtime behaviour is **untested** in this environment (see below).
 
 ## Verification: what was actually run
 
@@ -284,10 +340,10 @@ Outbound network is allow-listed to `github.com`, `codeload.github.com`, `api.gi
 
 | Check | Result |
 | --- | --- |
-| XML well-formedness across all 26 XML files (manifest, values, values-night, values-v29, drawables, mipmaps, `xml/`) | **0 errors** |
-| Resource-reference resolution (`R.string/drawable/color/mipmap/xml/style` used in Kotlin, manifest and XML) | **0 missing** (82 strings, 25 drawables, 2 adaptive icons, 2 colors, 1 style) |
-| Brace/paren/bracket balance per Kotlin file (59 files, strings + comments stripped) | **0 imbalances** |
-| Project-internal `import com.sairen.player.*` resolution | **0 unresolved** |
+| XML well-formedness across all 38 XML files (manifest, values, values-night, values-v29, drawables, mipmaps, `xml/`) | **0 errors** |
+| Resource-reference resolution (`R.string/drawable/color/mipmap/xml/style` used in Kotlin, manifest and XML) | **0 missing** (117 strings, 28 drawables, 2 adaptive icons, 2 colors, 1 style) |
+| Brace/paren/bracket balance per Kotlin file (94 files, strings + comments stripped) | **0 imbalances** |
+| Project-internal `import com.sairen.player.*` resolution | **0 unresolved** (the crude scan flags only the generated `R` class and extension-property imports such as `sairenDataStore` / `findActivity`, which have no top-level declaration to match) |
 | Package declaration vs. directory | **0 mismatches** |
 
 ### 3. Real compiler + test execution (framework-free half)
@@ -295,35 +351,32 @@ Outbound network is allow-listed to `github.com`, `codeload.github.com`, `api.gi
 ```bash
 java -jar /tmp/kc/package/lib/kotlin-compiler.jar -nowarn -no-stdlib \
      -classpath /tmp/kc/package/lib/kotlin-stdlib.jar -d /tmp/verify/out <sources> <tests>
-# → exit 0, no errors (12 production files + 12 test-source files)
-
-java -cp /tmp/verify/out:<stdlib> verify.Runner <11 test classes>
+# → exit 0, no errors (19 production files + 18 test-source files, phase 3)
+java -cp /tmp/verify/out:<stdlib> verify.RunnerKt <18 test classes>
 ```
 
-Result (verbatim tail):
+Result (verbatim, phase 3):
 
 ```
-• LibraryGroupingTest (5 tests)
-• RecentPlayedListTest (5 tests)
-• SavedSessionCodecTest (4 tests)
-• ThemeModeTest (2 tests)
-• QueueEditorTest (12 tests)
-• RepeatModeTest (5 tests)
-• SearchIndexTest (9 tests)
-• PermissionDecisionTest (8 tests)
-• FormattersTest (4 tests)
-• WindowSizeTest (2 tests)
-• ThemeResolutionTest (2 tests)
-
-TESTS PASSED: 58, FAILED: 0
+TESTS PASSED: 118, FAILED: 0
 ```
 
-Compiled files: `Models.kt`, `ThemeMode.kt`, `LibraryGrouping.kt`, `RecentPlayedList.kt`,
-`SavedSession.kt`, `QueueEditor.kt`, `PlayerUiState.kt`, `AudioAccessState.kt`, `SearchIndex.kt`,
-`Formatters.kt`, `SairenWindowSize.kt`, `ThemeResolution.kt` — plus their test classes. Because the
-compiler is a *real* Kotlin compiler, this also type-checks every declaration those files use.
+Across 18 classes: `LibraryGroupingTest` (5), `LikedTracksTest` (5), `PlayCountRulesTest` (6),
+`PlayCountsTest` (8), `PlaylistCodecTest` (7), `PlaylistEditorTest` (15), `RecentPlayedListTest` (5),
+`SavedSessionCodecTest` (4), `SongCollectionsTest` (12), `ThemeModeTest` (2), `QueueEditorTest` (12),
+`RepeatModeTest` (5), `ArtworkPaletteTest` (7), `PermissionDecisionTest` (8), `SearchIndexTest` (9),
+`ThemeResolutionTest` (2), `FormattersTest` (4), `WindowSizeTest` (2).
 
-### 4. CI build and the two bugs it caught
+Compiled production files: `data/model/Models.kt`, `data/{PlayCountRules,PlayCounts,LikedTracks,Playlist,
+SongCollections,LibraryGrouping,RecentPlayedList,ThemeMode,SavedSession}.kt`,
+`playback/{QueueEditor,PlayerUiState,PlayerProgress}.kt`, `ui/search/SearchIndex.kt`,
+`ui/components/ArtworkPalette.kt`, `ui/permissions/AudioAccessState.kt`,
+`ui/util/{SairenWindowSize,Formatters}.kt`, `ui/theme/ThemeResolution.kt` — plus their test classes.
+Because the compiler is a *real* Kotlin compiler, this also type-checks every declaration those files use.
+The other 4 classes in the CI total (22 − 18 = `LibraryActionsViewModelTest`, `LibraryViewModelTest`,
+`SearchViewModelTest`, `SettingsViewModelTest`) need DataStore/Android stubs and are CI-only.
+
+### 4. CI build and the bugs it caught
 
 The sandbox above could not run Gradle, so the whole Android layer was compiled for the first time on
 GitHub's runners. The first CI runs (`42210231759`, `42210361824`, `42210656856`) all failed in the
@@ -359,26 +412,61 @@ errors were read, verbatim:
    standalone composable. The local wrapper is now `private fun RowScope.TopLevelNavItem(...)`, which is
    what its three call sites (all inside `NavigationBar { }`) already were.
 
-After both fixes, run **`42212827921`** is green end to end: unit tests, lint, APK assembly, the APK
-contents report and the artifact upload. Annotations from that run:
+After both fixes, run **`42212827921`** was green end to end for the phase-2 feature set.
+
+Phase 3 added a lot of new code, and three more real defects surfaced the same way — again found by the
+compiler, not by reasoning:
+
+3. **AppCompat-only attribute in the new vector drawables (resource linking).** `ic_heart`,
+   `ic_heart_filled`, `ic_playlist` and `ic_add` were written with `android:tint="?attr/colorControlNormal"`.
+   This is a Compose-only app with no AppCompat dependency, so the attribute does not exist and aapt2
+   refused to link:
+
+   ```
+   /drawable/ic_heart.xml:6: error: resource attr/colorControlNormal (aka com.sairen.player:attr/colorControlNormal) not found.
+   error: failed linking file resources.
+   ```
+
+   Fixed by deleting the attribute; Compose tints every icon at runtime (`Icon(tint = …)`), which is what
+   the pre-existing drawables already relied on.
+
+4. **A missing repository override.** `MusicRepository` implemented `recordCompletedPlay(...)` but not the
+   `PlayCountsStore.incrementPlayCount(trackId)` member it had inherited, so it was not abstract and did
+   not implement the interface. Fixed by collapsing the two names into the contract name; the service now
+   calls `incrementPlayCount`.
+
+5. **`Flow` vs. `StateFlow` in the library interface.** `MusicLibrary` inherited
+   `likedIds: Flow<Set<Long>>` from its stores while `LibraryViewModel` exposes
+   `StateFlow<Set<Long>>`, which does not type-check (`Initializer type mismatch: expected
+   'StateFlow<Set<Long>>', actual 'Flow<Set<Long>>'`). Every implementation caches a `StateFlow` anyway,
+   so the interface now narrows the three collections to `StateFlow`, and the UI can collect them without
+   inventing an initial value.
+
+After those fixes, run **`42239888376`** is green end to end — unit tests, lint, **both** APK variants, the
+APK contents report and the artifact upload. Annotations from that run, verbatim:
 
 ```
-Unit tests   : Executed 71 tests in 14 classes, 0 failed, 0 skipped.
-Lint         : passed
-Assemble     : app-debug.apk (15,646 KiB)
-lib/         : 4 files, arm64-v8a + armeabi-v7a only (see ABI notes)
+Unit test results : Executed 140 tests in 22 classes, 0 failed, 0 skipped.
+Debug APK report  : APKs: app-debug.apk (15774 KiB), app-release.apk (2773 KiB)
+                    lib/arm64-v8a/libandroidx.graphics.path.so
+                    lib/arm64-v8a/libdatastore_shared_counter.so
+                    lib/armeabi-v7a/libandroidx.graphics.path.so
+                    lib/armeabi-v7a/libdatastore_shared_counter.so
 ```
 
-No test was deleted, skipped, weakened or disabled to get there; the two changes are the resource fix
-and the `RowScope` fix.
+No test was deleted, skipped, weakened or disabled in any phase. Every fix above is a source change that
+addresses the actual error.
 
 ### 5. What is explicitly **not** verified
 
 | Item | Status |
 | --- | --- |
-| `./gradlew testDebugUnitTest`, `lintDebug`, `assembleDebug` | **RUN — green in GitHub Actions** (run `42212827921`); still **not run locally**, because the sandbox has no Gradle distribution, Android SDK or Maven access |
-| `assembleRelease` (R8 minify + resource shrinking) | **NOT RUN** — CI builds debug only |
-| Debug APK existence and `unzip -l` `lib/` inspection | **RUN** — 15,646 KiB APK, 4 ARM-only native libraries, artifact uploaded |
+| `./gradlew testDebugUnitTest`, `lintDebug`, `assembleDebug` | **RUN — green in GitHub Actions** (run `42239888376`); still **not run locally**, because the sandbox has no Gradle distribution, Android SDK or Maven access |
+| `assembleRelease` (R8 minify + resource shrinking, debug-key signed) | **RUN — green in CI**, `app-release.apk` 2,773 KiB. Whether the minified build behaves the same at runtime is **NOT TESTED** |
+| Both APKs' `lib/` inspection | **RUN** — `arm64-v8a` + `armeabi-v7a` only, 4 native libraries, artifact uploaded |
+| Real-world jank / frame timings, debug vs. release | **NOT MEASURED** — no device. The perf changes are verified as code (single-consumer position flow, remembered requests, stable keys), not as numbers |
+| Release-build runtime (R8-renamed classes, reflection, Media3 service lookup) | **NOT TESTED** — untested territory; the minified APK has never been launched |
+| Likes / play counts / playlists persistence round trip on a real device | **NOT TESTED** — the codecs and DataStore mapping are unit tested, the on-device store is not |
 | Kotlin compilation of the Android/Compose/Media3 layer | **RUN** — `compileDebugKotlin` and `compileDebugUnitTestKotlin` succeed in CI |
 | Manifest merger output, `foregroundServiceType` in the merged manifest | **NOT VERIFIED** — needs a merged-manifest artifact |
 | Install, playback, notification/lock-screen controls, permission dialogs, headphone-unplug pause, process-death resume | **NOT TESTED** — no emulator, no device, no `adb` |
@@ -400,6 +488,16 @@ and the `RowScope` fix.
 - Removing the currently playing item from the queue is disabled to avoid an implicit track change.
 - MediaStore is scanned on demand and cached in memory; there is no `ContentObserver`, so new files
   appear after a manual rescan (Settings → Rescan) or an app restart.
+- A play is counted at 30 seconds **or** half the track, whichever is shorter, so a 20-second track counts
+  after 10 seconds and a 10-minute track after 30. Tracks that never reach that point are never counted —
+  that is the requested rule, not an accident.
+- Playlist reordering uses up/down buttons (same reason as the queue): no drag-and-drop, so a long
+  playlist takes several taps to reorder. There is also no drag-to-reorder for the queue.
+- Likes, play counts and playlists are keyed by MediaStore `_ID`. If Android re-indexes a file (new id),
+  that track loses its heart and its count. Ids that no longer resolve are skipped silently in playlists
+  and counted as "N missing" in the header.
+- `app-release.apk` is signed with the **debug keystore** so it can be installed for performance testing.
+  It is not a distributable, upgradeable release build.
 - No paging library: the full song list is held in memory (fine for typical libraries of a few thousand
   tracks; very large collections would benefit from Paging 3).
 - No widgets, no equalizer, no sleep timer, no folder browsing, no tag editing, no playback speed —

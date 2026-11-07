@@ -27,15 +27,18 @@ import androidx.compose.ui.unit.dp
 import com.sairen.player.R
 import com.sairen.player.data.model.Track
 
-/** Bottom sheet with the per-track actions (play next, queue, navigate). */
+/** Bottom sheet with the per-track actions (like, queue, playlists, navigate). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrackActionsSheet(
     track: Track,
+    isLiked: Boolean,
     onDismiss: () -> Unit,
     onPlay: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
+    onToggleLike: () -> Unit,
+    onAddToPlaylist: () -> Unit,
     onGoToAlbum: (() -> Unit)? = null,
     onGoToArtist: (() -> Unit)? = null,
 ) {
@@ -69,6 +72,7 @@ fun TrackActionsSheet(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            LikeButton(isLiked = isLiked, onToggle = onToggleLike)
         }
         HorizontalDivider(
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
@@ -77,6 +81,11 @@ fun TrackActionsSheet(
         SheetAction(R.drawable.ic_play, stringResource(R.string.player_play), onPlay)
         SheetAction(R.drawable.ic_skip_next, stringResource(R.string.action_play_next), onPlayNext)
         SheetAction(R.drawable.ic_queue, stringResource(R.string.action_add_to_queue), onAddToQueue)
+        SheetAction(
+            iconRes = R.drawable.ic_playlist,
+            label = stringResource(R.string.action_add_to_playlist),
+            onClick = onAddToPlaylist,
+        )
         if (onGoToAlbum != null) {
             SheetAction(R.drawable.ic_album, stringResource(R.string.action_go_to_album), onGoToAlbum)
         }

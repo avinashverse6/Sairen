@@ -40,18 +40,24 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sairen.player.R
+import com.sairen.player.playback.PlayerProgress
 import com.sairen.player.playback.PlayerUiState
 import com.sairen.player.playback.RepeatMode
 import com.sairen.player.ui.components.Artwork
+import com.sairen.player.ui.components.LikeButton
+import com.sairen.player.ui.components.rememberArtworkAccent
 import com.sairen.player.ui.util.SairenWindowSize
 import com.sairen.player.ui.util.formatDuration
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Expandable Now Playing screen. On phones it is a single vertical column; on
@@ -62,6 +68,9 @@ import com.sairen.player.ui.util.formatDuration
 @Composable
 fun NowPlayingScreen(
     state: PlayerUiState,
+    progress: StateFlow<PlayerProgress>,
+    isLiked: Boolean,
+    onToggleLike: () -> Unit,
     actions: PlayerActions,
     windowSize: SairenWindowSize,
     contentPadding: PaddingValues,
@@ -73,10 +82,26 @@ fun NowPlayingScreen(
     var showQueue by rememberSaveable { mutableStateOf(false) }
     val expanded = windowSize.isExpanded
 
+    // A soft wash pulled from the current cover: the screen picks up the album's
+    // colour without copying any app's layout, and text stays on near-black.
+    val accent = rememberArtworkAccent(
+        artworkUri = state.artworkUri,
+        fallback = MaterialTheme.colorScheme.primary,
+    )
+    val background = MaterialTheme.colorScheme.background
+
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        accent.copy(alpha = 0.36f),
+                        accent.copy(alpha = 0.12f),
+                        background,
+                    ),
+                ),
+            )
             .padding(contentPadding),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -84,6 +109,8 @@ fun NowPlayingScreen(
                 onCollapse = onCollapse,
                 onToggleQueue = { showQueue = !showQueue },
                 queueVisible = showQueue,
+                isLiked = isLiked,
+                onToggleLike = onToggleLike,
             )
             if (expanded) {
                 Row(modifier = Modifier.fillMaxSize()) {
@@ -108,7 +135,11 @@ fun NowPlayingScreen(
                             onGoToArtist = onGoToArtist,
                         )
                         Spacer(Modifier.height(20.dp))
-                        SeekSection(state = state, actions = actions)
+                        SeekSection(
+                            progress = progress,
+                            currentMediaId = state.currentMediaId,
+                            actions = actions,
+                        )
                         Spacer(Modifier.height(12.dp))
                         TransportControls(state = state, actions = actions)
                     }
@@ -153,7 +184,11 @@ fun NowPlayingScreen(
                         textAlign = TextAlign.Start,
                     )
                     Spacer(Modifier.height(20.dp))
-                    SeekSection(state = state, actions = actions)
+                    SeekSection(
+                        progress = progress,
+                        currentMediaId = state.currentMediaId,
+                        actions = actions,
+                    )
                     Spacer(Modifier.height(12.dp))
                     TransportControls(state = state, actions = actions)
                     Spacer(Modifier.height(28.dp))
@@ -185,6 +220,8 @@ private fun PlayerTopBar(
     onCollapse: () -> Unit,
     onToggleQueue: () -> Unit,
     queueVisible: Boolean,
+    isLiked: Boolean,
+    onToggleLike: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -204,6 +241,11 @@ private fun PlayerTopBar(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             modifier = Modifier.weight(1f),
+        )
+        LikeButton(
+            isLiked = isLiked,
+            onToggle = onToggleLike,
+            modifier = Modifier.size(48.dp),
         )
         IconButton(onClick = onToggleQueue) {
             Icon(
@@ -296,13 +338,18 @@ private fun TrackInfo(
 
 @Composable
 private fun SeekSection(
-    state: PlayerUiState,
+    progress: StateFlow<PlayerProgress>,
+    currentMediaId: Long?,
     actions: PlayerActions,
 ) {
-    var scrubPosition by remember(state.currentMediaId) { mutableStateOf<Float?>(null) }
-    val duration = state.durationMs.coerceAtLeast(1L)
-    val sliderValue = (scrubPosition ?: state.positionMs.toFloat()).coerceIn(0f, duration.toFloat())
-    val shownPositionMs = scrubPosition?.toLong() ?: state.positionMs
+    // Only this composable reads the 2 Hz position tick.
+    val position by progress.collectAsStateWithLifecycle()
+    var scrubPosition by remember(currentMediaId) { mutableStateOf<Float?>(null) }
+    val durationMs = position.durationMs.coerceAtLeast(0L)
+    val duration = durationMs.coerceAtLeast(1L)
+    val sliderValue = (scrubPosition ?: position.positionMs.toFloat())
+        .coerceIn(0f, duration.toFloat())
+    val shownPositionMs = scrubPosition?.toLong() ?: position.positionMs
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Slider(
@@ -323,7 +370,7 @@ private fun SeekSection(
             )
             Spacer(Modifier.weight(1f))
             Text(
-                text = formatDuration(state.durationMs),
+                text = formatDuration(durationMs),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

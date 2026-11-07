@@ -1,10 +1,13 @@
 package com.sairen.player
 
 import android.content.Context
+import com.sairen.player.data.LikedStore
 import com.sairen.player.data.MediaStoreDataSource
 import com.sairen.player.data.MusicLibrary
 import com.sairen.player.data.MusicRepository
+import com.sairen.player.data.PlayCountStore
 import com.sairen.player.data.PlaybackSessionStore
+import com.sairen.player.data.PlaylistStore
 import com.sairen.player.data.RecentPlayedStore
 import com.sairen.player.data.SettingsStore
 import com.sairen.player.data.sairenDataStore
@@ -30,10 +33,16 @@ class AppContainer(baseContext: Context) {
     val settingsStore = SettingsStore(appContext.sairenDataStore)
     val recentPlayedStore = RecentPlayedStore(appContext.sairenDataStore)
     val playbackSessionStore = PlaybackSessionStore(appContext.sairenDataStore)
+    val likedStore = LikedStore(appContext.sairenDataStore)
+    val playCountStore = PlayCountStore(appContext.sairenDataStore)
+    val playlistStore = PlaylistStore(appContext.sairenDataStore)
 
     val musicLibrary: MusicLibrary = MusicRepository(
         dataSource = MediaStoreDataSource(appContext),
         recentPlayedStore = recentPlayedStore,
+        likedStore = likedStore,
+        playCountStore = playCountStore,
+        playlistStore = playlistStore,
         scope = appScope,
     )
 

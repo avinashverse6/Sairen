@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -53,25 +52,6 @@ fun SectionHeader(
         )
         if (actionLabel != null && onActionClick != null) {
             TextButton(onClick = onActionClick) { Text(actionLabel) }
-        }
-    }
-}
-
-@Composable
-fun LoadingState(modifier: Modifier = Modifier, label: String = stringResource(R.string.library_loading)) {
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator(
-                strokeWidth = 2.5.dp,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(32.dp),
-            )
-            Spacer(Modifier.height(16.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }

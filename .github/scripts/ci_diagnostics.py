@@ -32,7 +32,7 @@ LOG_FILES = ("unit-tests.log", "lint.log", "assemble.log")
 STEPS = (
     ("Unit tests", "TEST_OUTCOME", "unit-tests.log"),
     ("Lint", "LINT_OUTCOME", "lint.log"),
-    ("Assemble debug APK", "ASSEMBLE_OUTCOME", "assemble.log"),
+    ("Assemble debug + release APKs", "ASSEMBLE_OUTCOME", "assemble.log"),
 )
 
 
@@ -151,15 +151,15 @@ def test_summary() -> tuple[int, int, int, list[str]]:
 
 
 def apk_report() -> str:
-    apks = sorted(glob.glob("app/build/outputs/apk/debug/*.apk"))
+    apks = sorted(glob.glob("app/build/outputs/apk/**/*.apk", recursive=True))
     if not apks:
         return ""
     sizes = [f"{os.path.basename(p)} ({os.path.getsize(p) // 1024} KiB)" for p in apks]
     listing = read_text("apk-contents.txt")
     libs = [line.strip() for line in listing.splitlines() if re.search(r"lib/|\.so$", line)]
     if libs:
-        return "APK: " + ", ".join(sizes) + "\nNative libraries:\n" + "\n".join(libs)
-    return "APK: " + ", ".join(sizes) + "\nNo lib/ entries and no .so files: no native code in the APK."
+        return "APKs: " + ", ".join(sizes) + "\nNative libraries:\n" + "\n".join(libs)
+    return "APKs: " + ", ".join(sizes) + "\nNo lib/ entries and no .so files: no native code in the APKs."
 
 
 def failed_steps() -> list[tuple[str, str, str]]:
@@ -203,9 +203,9 @@ def main() -> int:
 
     apk = apk_report()
     if apk:
-        emit("notice", "Debug APK report", apk)
+        emit("notice", "APK report", apk)
     if not failures and not lint and not failed_steps():
-        emit("notice", "CI diagnostics", "Unit tests, lint and the debug APK build all succeeded.")
+        emit("notice", "CI diagnostics", "Unit tests, lint and both APK variants (debug + release) succeeded.")
 
     print("\n--- diagnostics summary ---")
     print(f"executed tests: {test_summary()[0]}, failing tests: {len(failures)}, lint errors: {len(lint)}, "

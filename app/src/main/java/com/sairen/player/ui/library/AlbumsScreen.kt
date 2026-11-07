@@ -2,6 +2,7 @@ package com.sairen.player.ui.library
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -26,7 +27,6 @@ import com.sairen.player.data.model.Album
 import com.sairen.player.data.model.LibraryState
 import com.sairen.player.ui.components.Artwork
 import com.sairen.player.ui.components.EmptyState
-import com.sairen.player.ui.components.LoadingState
 import com.sairen.player.ui.util.SairenWindowSize
 
 @Composable
@@ -40,7 +40,8 @@ fun AlbumsScreen(
 ) {
     val albums = state.library.albums
     when {
-        state.isLoading && !state.hasLoadedOnce -> LoadingState(modifier = modifier)
+        // First scan in flight: render nothing rather than a spinner.
+        !state.hasLoadedOnce -> Box(modifier = modifier.fillMaxSize())
         albums.isEmpty() -> EmptyState(
             title = stringResource(R.string.library_empty_title),
             message = stringResource(R.string.library_empty_message),
